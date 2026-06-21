@@ -1,13 +1,14 @@
-"""Datos iniciales: usuario admin + productos de ejemplo si la base está vacía."""
-from sqlalchemy import select
-from sqlalchemy.orm import Session
+"""Datos iniciales en Firestore: usuario admin + productos de ejemplo si están vacíos."""
+import logging
+from datetime import datetime, timezone
 
-from . import models
+from . import db as store
 from .auth import hash_password
 from .config import settings
 
-# Productos de limpieza del hogar con códigos de barra de muestra (EAN-13).
-# (nombre, emoji, categoría, unidad, precio, costo, stock, stock_min, barcode)
+log = logging.getLogger("feriakl.seed")
+
+# Productos de limpieza con códigos de barra de muestra (EAN-13).
 PRODUCTOS = [
     ("Detergente Omo 3kg", "🧴", "Ropa", "un", 8990, 6200, 12, 4, "7801234500017"),
     ("Cloro Clorox 1L", "🧴", "Desinfección", "un", 1690, 1050, 30, 10, "7801234500024"),
@@ -24,20 +25,36 @@ PRODUCTOS = [
 ]
 
 
-def seed(db: Session) -> None:
-    if not db.scalar(select(models.User).limit(1)):
-        db.add(models.User(
-            email=settings.seed_admin_email,
-            name=settings.seed_admin_name,
-            role="admin",
-            hashed_password=hash_password(settings.seed_admin_password),
-        ))
-        db.commit()
+def _coleccion_vacia(nombre: str) -> bool:
+    return not list(store.col(nombre).limit(1).stream())
 
-    if not db.scalar(select(models.Product).limit(1)):
+
+def seed() -> None:
+    # --- Admin ---
+    if _coleccion_vacia(store.USERS):
+        password = settings.seed_admin_password
+        if not password:
+            if settings.is_production:
+                log.warning("No se creó admin: define SEED_ADMIN_PASSWORD (fuerte) para crear el primer usuario.")
+                password = None
+            else:
+                password = "feria1234"  # solo desarrollo local
+                log.warning("Admin de desarrollo creado con contraseña por defecto. NO usar en producción.")
+        if password:
+            store.col(store.USERS).document().set({
+                "email": settings.seed_admin_email.lower(),
+                "name": settings.seed_admin_name,
+                "role": "admin",
+                "active": True,
+                "hashed_password": hash_password(password),
+                "created_at": datetime.now(timezone.utc),
+            })
+
+    # --- Productos de ejemplo ---
+    if settings.seed_demo_products and _coleccion_vacia(store.PRODUCTS):
         for nombre, emoji, cat, unidad, precio, costo, stock, smin, barcode in PRODUCTOS:
-            db.add(models.Product(
-                nombre=nombre, emoji=emoji, categoria=cat, unidad=unidad,
-                precio=precio, costo=costo, stock=stock, stock_min=smin, barcode=barcode,
-            ))
-        db.commit()
+            store.col(store.PRODUCTS).document().set({
+                "nombre": nombre, "emoji": emoji, "categoria": cat, "unidad": unidad,
+                "precio": precio, "costo": costo, "stock": stock, "stock_min": smin,
+                "barcode": barcode, "activo": True,
+            })

@@ -1,19 +1,24 @@
-"""Esquemas Pydantic: validación de entrada y forma de las respuestas JSON."""
+"""Esquemas Pydantic: validación de entrada y forma de las respuestas JSON.
+
+Las validaciones (longitudes, formatos) son una capa de seguridad: rechazan datos
+malformados o abusivos antes de tocar la base.
+"""
 from datetime import datetime
-from pydantic import BaseModel, EmailStr, ConfigDict, Field
+from pydantic import BaseModel, EmailStr, Field
+
+PASSWORD_MIN = 8
 
 
 # ---------- Auth / Usuarios ----------
 class UserCreate(BaseModel):
     email: EmailStr
-    name: str
-    password: str = Field(min_length=6)
-    role: str = "vendedor"
+    name: str = Field(min_length=1, max_length=120)
+    password: str = Field(min_length=PASSWORD_MIN, max_length=128)
+    role: str = Field(default="vendedor", pattern="^(admin|vendedor)$")
 
 
 class UserOut(BaseModel):
-    model_config = ConfigDict(from_attributes=True)
-    id: int
+    id: str
     email: EmailStr
     name: str
     role: str
@@ -26,17 +31,22 @@ class Token(BaseModel):
     user: UserOut
 
 
+class ChangePassword(BaseModel):
+    current_password: str = Field(min_length=1, max_length=128)
+    new_password: str = Field(min_length=PASSWORD_MIN, max_length=128)
+
+
 # ---------- Productos ----------
 class ProductBase(BaseModel):
-    nombre: str
-    barcode: str | None = None
-    emoji: str = "📦"
-    categoria: str = "General"
-    unidad: str = "un"
-    precio: float
-    costo: float = 0
-    stock: float = 0
-    stock_min: float = 0
+    nombre: str = Field(min_length=1, max_length=120)
+    barcode: str | None = Field(default=None, max_length=64)
+    emoji: str = Field(default="📦", max_length=8)
+    categoria: str = Field(default="General", max_length=40)
+    unidad: str = Field(default="un", pattern="^(un|kg)$")
+    precio: float = Field(ge=0, le=99_999_999)
+    costo: float = Field(default=0, ge=0, le=99_999_999)
+    stock: float = Field(default=0, ge=0, le=9_999_999)
+    stock_min: float = Field(default=0, ge=0, le=9_999_999)
     activo: bool = True
 
 
@@ -45,38 +55,35 @@ class ProductCreate(ProductBase):
 
 
 class ProductUpdate(BaseModel):
-    nombre: str | None = None
-    barcode: str | None = None
-    emoji: str | None = None
-    categoria: str | None = None
-    unidad: str | None = None
-    precio: float | None = None
-    costo: float | None = None
-    stock: float | None = None
-    stock_min: float | None = None
+    nombre: str | None = Field(default=None, min_length=1, max_length=120)
+    barcode: str | None = Field(default=None, max_length=64)
+    emoji: str | None = Field(default=None, max_length=8)
+    categoria: str | None = Field(default=None, max_length=40)
+    unidad: str | None = Field(default=None, pattern="^(un|kg)$")
+    precio: float | None = Field(default=None, ge=0, le=99_999_999)
+    costo: float | None = Field(default=None, ge=0, le=99_999_999)
+    stock: float | None = Field(default=None, ge=0, le=9_999_999)
+    stock_min: float | None = Field(default=None, ge=0, le=9_999_999)
     activo: bool | None = None
 
 
 class ProductOut(ProductBase):
-    model_config = ConfigDict(from_attributes=True)
-    id: int
+    id: str
 
 
 # ---------- Ventas ----------
 class SaleItemIn(BaseModel):
-    product_id: int
-    cantidad: float
+    product_id: str = Field(min_length=1, max_length=64)
+    cantidad: float = Field(gt=0, le=9_999_999)
 
 
 class SaleCreate(BaseModel):
-    metodo_pago: str  # efectivo | transferencia | fiado
-    items: list[SaleItemIn]
-    customer_id: int | None = None  # requerido si metodo_pago == "fiado"
+    metodo_pago: str = Field(pattern="^(efectivo|transferencia)$")
+    items: list[SaleItemIn] = Field(min_length=1, max_length=200)
 
 
 class SaleItemOut(BaseModel):
-    model_config = ConfigDict(from_attributes=True)
-    product_id: int
+    product_id: str
     nombre: str
     precio: float
     cantidad: float
@@ -84,44 +91,23 @@ class SaleItemOut(BaseModel):
 
 
 class SaleOut(BaseModel):
-    model_config = ConfigDict(from_attributes=True)
-    id: int
+    id: str
     metodo_pago: str
     total: float
-    customer_id: int | None
     created_at: datetime
     items: list[SaleItemOut]
 
 
-# ---------- Clientes / Fiado ----------
-class CustomerCreate(BaseModel):
-    nombre: str
-    telefono: str = ""
-
-
-class CustomerOut(BaseModel):
-    model_config = ConfigDict(from_attributes=True)
-    id: int
-    nombre: str
-    telefono: str
-    deuda: float = 0  # calculado: ventas fiado - abonos
-
-
-class PaymentCreate(BaseModel):
-    monto: float = Field(gt=0)
-
-
 # ---------- Mermas ----------
 class MermaCreate(BaseModel):
-    product_id: int
-    cantidad: float
-    motivo: str = ""
+    product_id: str = Field(min_length=1, max_length=64)
+    cantidad: float = Field(gt=0, le=9_999_999)
+    motivo: str = Field(default="", max_length=200)
 
 
 class MermaOut(BaseModel):
-    model_config = ConfigDict(from_attributes=True)
-    id: int
-    product_id: int
+    id: str
+    product_id: str
     cantidad: float
     motivo: str
     perdida: float

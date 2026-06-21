@@ -1,46 +1,63 @@
-"""Ventas (punto de venta). Crear una venta descuenta stock de forma transaccional."""
-from fastapi import APIRouter, Depends, HTTPException
-from sqlalchemy.orm import Session
-from sqlalchemy import select, desc
+"""Ventas (POS). Crear una venta descuenta stock con una transacción de Firestore."""
+from datetime import datetime, timezone
 
-from .. import models, schemas
+from fastapi import APIRouter, Depends, HTTPException
+from google.cloud import firestore
+from google.cloud.firestore_v1 import FieldFilter
+
+from .. import schemas
+from .. import db as store
 from ..auth import get_current_user
-from ..database import get_db
 
 router = APIRouter(prefix="/sales", tags=["ventas"])
 
 
 @router.post("", response_model=schemas.SaleOut, status_code=201)
-def create_sale(data: schemas.SaleCreate, db: Session = Depends(get_db), user: models.User = Depends(get_current_user)):
-    if not data.items:
-        raise HTTPException(status_code=400, detail="La venta no tiene productos")
-    if data.metodo_pago == "fiado" and not data.customer_id:
-        raise HTTPException(status_code=400, detail="Una venta fiada requiere un cliente")
+def create_sale(data: schemas.SaleCreate, user: dict = Depends(get_current_user)):
+    # Agrupar cantidades por producto (defensa ante ítems repetidos).
+    cantidades: dict[str, float] = {}
+    for it in data.items:
+        cantidades[it.product_id] = cantidades.get(it.product_id, 0) + it.cantidad
 
-    sale = models.Sale(user_id=user.id, metodo_pago=data.metodo_pago, total=0, customer_id=data.customer_id)
-    total = 0.0
-    for item in data.items:
-        product = db.get(models.Product, item.product_id)
-        if not product:
-            raise HTTPException(status_code=404, detail=f"Producto {item.product_id} no existe")
-        if item.cantidad <= 0:
-            raise HTTPException(status_code=400, detail="Cantidad inválida")
-        if product.stock < item.cantidad:
-            raise HTTPException(status_code=409, detail=f"Stock insuficiente de {product.nombre}")
-        subtotal = round(product.precio * item.cantidad)
-        total += subtotal
-        product.stock -= item.cantidad
-        sale.items.append(models.SaleItem(
-            product_id=product.id, nombre=product.nombre,
-            precio=product.precio, cantidad=item.cantidad, subtotal=subtotal,
-        ))
-    sale.total = total
-    db.add(sale)
-    db.commit()
-    db.refresh(sale)
-    return sale
+    transaction = store.db.transaction()
+    resultado = {}
+
+    @firestore.transactional
+    def _registrar(txn):
+        refs = {pid: store.col(store.PRODUCTS).document(pid) for pid in cantidades}
+        snaps = {pid: ref.get(transaction=txn) for pid, ref in refs.items()}  # todas las lecturas primero
+
+        items_out = []
+        total = 0.0
+        nuevos_stock = {}
+        for pid, cant in cantidades.items():
+            snap = snaps[pid]
+            if not snap.exists:
+                raise HTTPException(status_code=404, detail=f"Producto {pid} no existe")
+            p = snap.to_dict()
+            if p.get("stock", 0) < cant:
+                raise HTTPException(status_code=409, detail=f"Stock insuficiente de {p.get('nombre','producto')}")
+            subtotal = round(p["precio"] * cant)
+            total += subtotal
+            nuevos_stock[pid] = p["stock"] - cant
+            items_out.append({"product_id": pid, "nombre": p["nombre"], "precio": p["precio"],
+                              "cantidad": cant, "subtotal": subtotal})
+
+        for pid, nuevo in nuevos_stock.items():  # luego las escrituras
+            txn.update(refs[pid], {"stock": nuevo})
+        sale_ref = store.col(store.SALES).document()
+        doc = {"user_id": user["id"], "metodo_pago": data.metodo_pago, "total": total,
+               "items": items_out, "created_at": datetime.now(timezone.utc)}
+        txn.set(sale_ref, doc)
+        doc["id"] = sale_ref.id
+        resultado.update(doc)
+
+    _registrar(transaction)
+    return schemas.SaleOut(**resultado)
 
 
 @router.get("", response_model=list[schemas.SaleOut])
-def list_sales(limit: int = 50, db: Session = Depends(get_db), _: models.User = Depends(get_current_user)):
-    return db.scalars(select(models.Sale).order_by(desc(models.Sale.created_at)).limit(limit)).all()
+def list_sales(limit: int = 50, _: dict = Depends(get_current_user)):
+    limit = max(1, min(limit, 200))
+    q = store.col(store.SALES).order_by("created_at", direction=firestore.Query.DESCENDING).limit(limit)
+    return [schemas.SaleOut(**store.doc_to_dict(d)) for d in q.stream()]

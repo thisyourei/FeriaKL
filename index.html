@@ -258,7 +258,10 @@
       <h1 id="viewTitle">Punto de venta</h1>
       <div class="date" id="todayDate"></div>
     </div>
-    <button class="logout" id="logoutBtn" title="Cerrar sesión">⏻</button>
+    <div style="display:flex; gap:8px">
+      <button class="logout" id="pwdBtn" title="Cambiar mi contraseña">🔑</button>
+      <button class="logout" id="logoutBtn" title="Cerrar sesión">⏻</button>
+    </div>
   </div>
 
   <main>
@@ -382,13 +385,27 @@
       <h3>Nuevo usuario</h3>
       <label for="uName">Nombre</label><input id="uName" placeholder="Nombre y apellido" required>
       <label for="uEmail">Correo</label><input id="uEmail" type="email" placeholder="correo@feriakl.cl" required>
-      <label for="uPass">Contraseña</label><input id="uPass" type="password" minlength="6" placeholder="mínimo 6 caracteres" required>
+      <label for="uPass">Contraseña</label><input id="uPass" type="password" minlength="8" autocomplete="new-password" placeholder="mínimo 8 caracteres" required>
       <label for="uRole">Rol</label>
       <select id="uRole"><option value="vendedor">Vendedor (vende y registra mermas)</option><option value="admin">Administrador (todo)</option></select>
       <div class="modal-err" id="uErr"></div>
       <div class="modal-actions">
         <button type="button" class="btn ghost" onclick="cerrarModal()">Cancelar</button>
         <button type="submit" class="btn" id="uSubmit">Crear usuario</button>
+      </div>
+    </form>
+  </div>
+
+  <!-- Modal: cambiar mi contraseña -->
+  <div class="modal-bg" id="pwdModal" style="display:none">
+    <form class="modal" id="pwdForm">
+      <h3>Cambiar mi contraseña</h3>
+      <label for="pwdCur">Contraseña actual</label><input id="pwdCur" type="password" autocomplete="current-password" required>
+      <label for="pwdNew">Nueva contraseña</label><input id="pwdNew" type="password" minlength="8" autocomplete="new-password" placeholder="mínimo 8 caracteres" required>
+      <div class="modal-err" id="pwdErr"></div>
+      <div class="modal-actions">
+        <button type="button" class="btn ghost" onclick="document.getElementById('pwdModal').style.display='none'">Cancelar</button>
+        <button type="submit" class="btn" id="pwdSubmit">Guardar</button>
       </div>
     </form>
   </div>
@@ -445,6 +462,8 @@
 // URL relativa: funciona en local y en Cloud Run sin cambiar nada.
 const API = '';
 const fmt = n => '$' + Math.round(n).toLocaleString('es-CL');
+// Escapa texto que viene de la base antes de insertarlo como HTML (previene XSS almacenado).
+const esc = s => String(s == null ? '' : s).replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
 
 /* ===== Estado ===== */
 let token = localStorage.getItem('feriakl_token') || null;
@@ -545,17 +564,18 @@ async function loadDashboard(){
   const ventas = await api('/sales?limit=8');
   document.getElementById('recentBody').innerHTML = ventas.map(v=>{
     const hora = new Date(v.created_at).toLocaleTimeString('es-CL',{hour:'2-digit',minute:'2-digit'});
-    const detalle = v.items.map(i=>i.nombre).join(', ') || '—';
+    const detalle = v.items.map(i=>esc(i.nombre)).join(', ') || '—';
     const pago = v.metodo_pago.charAt(0).toUpperCase()+v.metodo_pago.slice(1);
     return `<tr><td>${hora}</td><td>${detalle}</td><td><span class="badge ${v.metodo_pago==='fiado'?'low':'ok'}">${pago}</span></td><td class="num">${fmt(v.total)}</td></tr>`;
   }).join('') || '<tr><td colspan="4" style="color:var(--muted)">Aún no hay ventas hoy</td></tr>';
 }
 
 /* ===== Render POS ===== */
+function setCat(c){ catFiltro = c; renderPOS(); }
 function renderChips(){
   const cats = ['Todo', ...new Set(productos.map(p=>p.cat))];
   document.getElementById('posChips').innerHTML = cats.map(c=>
-    `<button class="chip ${c===catFiltro?'active':''}" onclick="catFiltro='${c}';renderPOS()">${c}</button>`).join('');
+    `<button class="chip ${c===catFiltro?'active':''}" data-cat="${esc(c)}" onclick="setCat(this.dataset.cat)">${esc(c)}</button>`).join('');
 }
 function renderPOS(){
   renderChips();
@@ -567,9 +587,9 @@ function renderPOS(){
       let tag = '';
       if(p.stock<=0) tag='<span class="stock-tag out">Agotado</span>';
       else if(p.stock<=p.min) tag=`<span class="stock-tag low">Quedan ${p.stock}</span>`;
-      return `<div class="prod-tile" style="${dis?'opacity:.5;pointer-events:none':''}" onclick="addCart(${p.id})">
-        ${tag}<div class="emoji">${p.emoji}</div><div class="pname">${p.nombre}</div>
-        <div class="pprice">${fmt(p.precio)}/${p.unidad}</div></div>`;
+      return `<div class="prod-tile" style="${dis?'opacity:.5;pointer-events:none':''}" data-id="${esc(p.id)}" onclick="addCart(this.dataset.id)">
+        ${tag}<div class="emoji">${esc(p.emoji)}</div><div class="pname">${esc(p.nombre)}</div>
+        <div class="pprice">${fmt(p.precio)}/${esc(p.unidad)}</div></div>`;
     }).join('') || '<div style="color:var(--muted);padding:20px">Sin productos en esta categoría.</div>';
   renderCart();
 }
@@ -583,15 +603,16 @@ function addCart(id){
   renderCart();
 }
 function chQty(id,sign){ const c=cart.find(x=>x.id===id); if(!c) return; c.qty=+(c.qty+sign*c.paso).toFixed(2); if(c.qty<=0) cart=cart.filter(x=>x.id!==id); renderCart(); }
+function chQtyEl(el){ chQty(el.dataset.id, Number(el.dataset.d)); }
 function rmCart(id){ cart=cart.filter(x=>x.id!==id); renderCart(); }
 function renderCart(){
   const items = document.getElementById('cartItems');
   if(!cart.length){ items.innerHTML='<div class="cart-empty">📷 Escanea un código<br>o agrega productos abajo</div>'; }
   else items.innerHTML = cart.map(c=>{
     const cant = c.unidad==='kg' ? c.qty.toLocaleString('es-CL') : c.qty;
-    return `<div class="cart-row"><div><div><b>${c.emoji} ${c.nombre}</b></div>
-      <div class="qty"><span class="qm" onclick="chQty(${c.id},-1)">−</span> ${cant} ${c.unidad} <span class="qm" onclick="chQty(${c.id},1)">+</span> · ${fmt(c.precio)}/${c.unidad}</div></div>
-      <div style="display:flex;align-items:center;gap:10px"><b>${fmt(c.precio*c.qty)}</b><span class="x" onclick="rmCart(${c.id})">✕</span></div></div>`;
+    return `<div class="cart-row"><div><div><b>${esc(c.emoji)} ${esc(c.nombre)}</b></div>
+      <div class="qty"><span class="qm" data-id="${esc(c.id)}" data-d="-1" onclick="chQtyEl(this)">−</span> ${cant} ${esc(c.unidad)} <span class="qm" data-id="${esc(c.id)}" data-d="1" onclick="chQtyEl(this)">+</span> · ${fmt(c.precio)}/${esc(c.unidad)}</div></div>
+      <div style="display:flex;align-items:center;gap:10px"><b>${fmt(c.precio*c.qty)}</b><span class="x" data-id="${esc(c.id)}" onclick="rmCart(this.dataset.id)">✕</span></div></div>`;
   }).join('');
   const total = cart.reduce((s,c)=>s+c.precio*c.qty,0);
   document.getElementById('cartCount').textContent = cart.length;
@@ -617,8 +638,8 @@ function renderInventory(){
   const q=(document.getElementById('invSearch').value||'').toLowerCase();
   document.getElementById('invBody').innerHTML = productos.filter(p=>p.nombre.toLowerCase().includes(q)).map(p=>{
     const [c,t]=estado(p); const margen=Math.round((p.precio-p.costo)/p.precio*100);
-    return `<tr><td>${p.emoji} ${p.nombre}</td><td style="font-variant-numeric:tabular-nums;color:var(--muted)">${p.barcode||'—'}</td><td class="num">${fmt(p.precio)}</td><td class="num">${fmt(p.costo)}</td>
-      <td class="num">${margen}%</td><td class="num">${p.stock} ${p.unidad}</td><td><span class="badge ${c}">${t}</span></td></tr>`;
+    return `<tr><td>${esc(p.emoji)} ${esc(p.nombre)}</td><td style="font-variant-numeric:tabular-nums;color:var(--muted)">${esc(p.barcode)||'—'}</td><td class="num">${fmt(p.precio)}</td><td class="num">${fmt(p.costo)}</td>
+      <td class="num">${margen}%</td><td class="num">${p.stock} ${esc(p.unidad)}</td><td><span class="badge ${c}">${t}</span></td></tr>`;
   }).join('');
 }
 
@@ -628,8 +649,8 @@ async function loadUsuarios(){
   try { data = await api('/auth/users'); }
   catch(e){ return; } // si no es admin, el backend responde 403; ignoramos
   document.getElementById('usuariosBody').innerHTML = data.map(u=>
-    `<tr><td>${u.name}${u.id===currentUser.id?' <span style="color:var(--muted)">(tú)</span>':''}</td>
-      <td>${u.email}</td>
+    `<tr><td>${esc(u.name)}${u.id===currentUser.id?' <span style="color:var(--muted)">(tú)</span>':''}</td>
+      <td>${esc(u.email)}</td>
       <td><span class="badge ${u.role==='admin'?'ok':'low'}">${u.role==='admin'?'Administrador':'Vendedor'}</span></td>
       <td><span class="badge ${u.active?'ok':'out'}">${u.active?'Activo':'Inactivo'}</span></td></tr>`).join('');
 }
@@ -652,7 +673,7 @@ async function loadMermas(){
   document.getElementById('kpiMerma').textContent = fmt(total);
   document.getElementById('mermaBody').innerHTML = data.map(m=>{
     const f = new Date(m.created_at).toLocaleDateString('es-CL',{day:'numeric',month:'short'});
-    return `<tr><td>${f}</td><td>${nombreDe(m.product_id)}</td><td class="num">${m.cantidad}</td><td>${m.motivo||'—'}</td><td class="num">${fmt(m.perdida)}</td></tr>`;
+    return `<tr><td>${f}</td><td>${esc(nombreDe(m.product_id))}</td><td class="num">${m.cantidad}</td><td>${esc(m.motivo)||'—'}</td><td class="num">${fmt(m.perdida)}</td></tr>`;
   }).join('') || '<tr><td colspan="5" style="color:var(--muted)">Sin mermas registradas</td></tr>';
 }
 async function registrarMerma(){
@@ -866,7 +887,7 @@ function renderScanCart(){
   box.style.display = 'block';
   box.innerHTML =
     '<div class="sc-list">' + cart.slice().reverse().map(c =>
-      `<div class="sc-row"><span>${c.emoji} ${c.nombre}${c.qty>1?' ×'+c.qty:''}</span><span>${fmt(c.precio*c.qty)}</span></div>`).join('') +
+      `<div class="sc-row"><span>${esc(c.emoji)} ${esc(c.nombre)}${c.qty>1?' ×'+c.qty:''}</span><span>${fmt(c.precio*c.qty)}</span></div>`).join('') +
     '</div>' +
     `<div class="sc-total"><span>${cart.length} producto(s)</span><b>${fmt(total)}</b></div>`;
 }
@@ -914,7 +935,7 @@ async function loadReportes(){
     document.getElementById('chart').innerHTML = '<div style="color:var(--muted)">Aún no hay ventas para graficar.</div>';
   }
   document.getElementById('topBody').innerHTML = top.map(p=>
-    `<tr><td>${p.nombre}</td><td class="num">${p.cantidad}</td><td class="num">${fmt(p.ingresos)}</td></tr>`).join('')
+    `<tr><td>${esc(p.nombre)}</td><td class="num">${p.cantidad}</td><td class="num">${fmt(p.ingresos)}</td></tr>`).join('')
     || '<tr><td colspan="3" style="color:var(--muted)">Sin datos aún</td></tr>';
 }
 
@@ -922,6 +943,25 @@ async function loadReportes(){
 document.getElementById('todayDate').textContent = new Date().toLocaleDateString('es-CL',{weekday:'long',day:'numeric',month:'long'});
 document.getElementById('nav').addEventListener('click', e=>{ const b=e.target.closest('button'); if(b) go(b.dataset.view); });
 document.getElementById('logoutBtn').addEventListener('click', doLogout);
+document.getElementById('pwdBtn').addEventListener('click', ()=>{
+  document.getElementById('pwdForm').reset();
+  document.getElementById('pwdErr').textContent = '';
+  document.getElementById('pwdModal').style.display = 'flex';
+});
+document.getElementById('pwdForm').addEventListener('submit', async e=>{
+  e.preventDefault();
+  const btn = document.getElementById('pwdSubmit'), err = document.getElementById('pwdErr');
+  err.textContent=''; btn.disabled=true; btn.textContent='Guardando...';
+  try {
+    await api('/auth/change-password', { body:{
+      current_password: document.getElementById('pwdCur').value,
+      new_password: document.getElementById('pwdNew').value,
+    }});
+    document.getElementById('pwdModal').style.display='none';
+    toast('Contraseña actualizada ✅');
+  } catch(ex){ err.textContent = ex.message; }
+  finally { btn.disabled=false; btn.textContent='Guardar'; }
+});
 document.getElementById('userForm').addEventListener('submit', async e=>{
   e.preventDefault();
   const btn = document.getElementById('uSubmit'), err = document.getElementById('uErr');

@@ -5,26 +5,37 @@ from pydantic_settings import BaseSettings, SettingsConfigDict
 class Settings(BaseSettings):
     model_config = SettingsConfigDict(env_file=".env", extra="ignore")
 
-    # En local usa SQLite (no requiere instalar nada). En Cloud Run apunta a Cloud SQL:
-    #   postgresql+psycopg2://USER:PASS@/DB?host=/cloudsql/PROJECT:REGION:INSTANCE
-    database_url: str = "sqlite:///./feriakl.db"
+    # --- GCP / Firestore ---
+    # ID del proyecto de Google Cloud. En Cloud Run se detecta solo; en local conviene fijarlo.
+    gcp_project: str = ""
+    # Base de datos Firestore a usar ("(default)" salvo que crees una con nombre).
+    firestore_database: str = "(default)"
 
-    # Clave para firmar los JWT. En producción se inyecta como secreto (NO hardcodear).
-    secret_key: str = "cambia-esta-clave-en-produccion-usa-un-secreto-de-gcp"
-    access_token_expire_minutes: int = 60 * 12  # 12 horas (jornada de feria)
+    # --- Seguridad ---
+    # Clave para firmar los JWT. OBLIGATORIO en producción (se inyecta como secreto).
+    secret_key: str = "dev-insegura-cambiar-en-produccion"
+    access_token_expire_minutes: int = 60 * 12  # 12 horas (una jornada)
     algorithm: str = "HS256"
 
-    # Orígenes permitidos para el frontend (CORS).
-    cors_origins: str = "*"
+    # "production" activa chequeos estrictos (exige secretos fuertes, cabeceras HSTS, etc.).
+    environment: str = "development"
 
-    # Carpeta con el frontend a servir. Vacío = autodetecta (raíz del repo en local).
-    # En el contenedor de producción se fija por variable de entorno (FRONTEND_DIR).
+    # Orígenes permitidos para CORS. Vacío = solo mismo origen (la app se sirve desde el backend).
+    cors_origins: str = ""
+
+    # --- Frontend ---
+    # Carpeta del frontend. Vacío = autodetecta (raíz del repo en local); en el contenedor: FRONTEND_DIR.
     frontend_dir: str = ""
 
-    # Datos del usuario admin que se crea al iniciar si la base está vacía.
+    # --- Datos iniciales (seed) ---
     seed_admin_email: str = "admin@feriakl.cl"
-    seed_admin_password: str = "feria1234"
+    seed_admin_password: str = ""   # si está vacío en producción, NO se crea admin con clave por defecto
     seed_admin_name: str = "Administrador"
+    seed_demo_products: bool = True  # cargar productos de limpieza de ejemplo si la colección está vacía
+
+    @property
+    def is_production(self) -> bool:
+        return self.environment.lower() in ("production", "prod")
 
 
 settings = Settings()

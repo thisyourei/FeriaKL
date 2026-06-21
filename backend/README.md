@@ -1,110 +1,63 @@
-# FeriaKL — API (backend Python)
+# FeriaKL — API (backend Python + Firestore)
 
-API REST en **FastAPI** para FeriaKL. Corre local con **SQLite** (sin instalar nada extra) y se despliega en **Google Cloud Run + Cloud SQL (PostgreSQL)**.
+API REST en **FastAPI** que además sirve la PWA. Base de datos **Firestore** (nativa de GCP, free tier). Se despliega en **Cloud Run** (free tier), que sirve backend y frontend desde el mismo origen y con HTTPS/certificado administrado automático.
 
 ## Estructura
 
 ```
-backend/
-├─ app/
-│  ├─ main.py          # arma la app, CORS, crea tablas y seed al iniciar
-│  ├─ config.py        # configuración por variables de entorno
-│  ├─ database.py      # conexión SQLAlchemy (SQLite o Postgres)
-│  ├─ models.py        # tablas: users, products, sales, sale_items, customers, payments, mermas
-│  ├─ schemas.py       # esquemas Pydantic (entrada/salida JSON)
-│  ├─ auth.py          # hash de contraseñas + JWT + roles
-│  ├─ seed.py          # admin inicial + productos de ejemplo
-│  └─ routers/         # auth, products, sales, customers (fiado), mermas, reports
-├─ requirements.txt
-├─ Dockerfile          # para Cloud Run
-└─ .env.example
+backend/app/
+├─ main.py        # app, cabeceras de seguridad (CSP, HSTS, Permissions-Policy), CORS, seed
+├─ config.py      # configuración por variables de entorno
+├─ db.py          # cliente Firestore + colecciones (users, products, sales, mermas)
+├─ auth.py        # bcrypt + JWT + roles + rate-limit de login
+├─ schemas.py     # validación Pydantic (longitudes, formatos)
+├─ seed.py        # admin inicial + productos de limpieza de ejemplo
+└─ routers/       # auth, products, sales, mermas, reports
 ```
+
+## Seguridad incluida
+
+- **Login por persona** con JWT y contraseñas **bcrypt**; política mínima de 8 caracteres.
+- **Rate-limit** de login (anti fuerza bruta) por IP+correo.
+- **Cabeceras**: `Content-Security-Policy`, `X-Content-Type-Options`, `X-Frame-Options`, `Referrer-Policy`, `Permissions-Policy` (cámara solo same-origin), `HSTS` en producción.
+- **Validación estricta** de entradas (Pydantic) y **escape XSS** en el frontend.
+- **Secretos** (SECRET_KEY, contraseña admin) en **Secret Manager**, nunca en el código.
+- En `ENVIRONMENT=production` la app **no arranca** con la clave de desarrollo.
 
 ## Correr en local
 
-Requisitos: **Python 3.12+** (instálalo desde https://www.python.org/downloads/ — marca "Add to PATH").
+Requiere credenciales de GCP y una base Firestore (el emulador necesita Java 21+):
 
 ```bash
+gcloud auth application-default login          # credenciales locales (ADC)
 cd backend
-python -m venv .venv
-# Windows PowerShell:
-.venv\Scripts\Activate.ps1
+python -m venv .venv && .venv\Scripts\activate
 pip install -r requirements.txt
-copy .env.example .env        # (PowerShell)  o  cp .env.example .env
+copy .env.example .env                          # edita GCP_PROJECT, SECRET_KEY, SEED_ADMIN_PASSWORD
 uvicorn app.main:app --reload
 ```
 
-- API: http://127.0.0.1:8000
-- **Documentación interactiva (Swagger): http://127.0.0.1:8000/docs** ← prueba todo desde aquí
-- Login inicial: `admin@feriakl.cl` / `feria1234` (cámbialo).
+- App + API: http://127.0.0.1:8000 · Docs: http://127.0.0.1:8000/docs
 
-### Cómo autenticarte para probar
-1. En `/docs`, endpoint `POST /auth/login` → ingresa el correo en *username* y la clave.
-2. Copia el `access_token`. Clic en **Authorize** (arriba a la derecha) y pégalo.
-3. Ya puedes llamar al resto de endpoints (productos, ventas, fiado, etc.).
+## Desplegar a GCP (Cloud Run + Firestore, free tier)
 
-## Endpoints principales
-
-| Método | Ruta | Para qué |
-|---|---|---|
-| POST | `/auth/login` | Iniciar sesión (devuelve token) |
-| GET/POST | `/auth/users` | Listar / crear usuarios (admin) |
-| GET/POST/PATCH | `/products` | Inventario |
-| POST/GET | `/sales` | Registrar venta (descuenta stock) / historial |
-| GET/POST | `/customers` | Clientes con fiado (deuda calculada) |
-| POST | `/customers/{id}/payments` | Registrar abono |
-| GET/POST | `/mermas` | Registrar / listar pérdidas |
-| GET | `/reports/summary` | KPIs del día |
-| GET | `/reports/sales-by-day` | Ventas por día |
-| GET | `/reports/top-products` | Más vendidos |
-
-## Desplegar en Google Cloud (GCP)
-
-Requisitos: cuenta GCP con facturación, [gcloud CLI](https://cloud.google.com/sdk/docs/install) instalado.
+Con `gcloud` autenticado, desde la **raíz del repo**:
 
 ```bash
-# Variables
-export PROJECT=feriakl            # tu ID de proyecto
-export REGION=southamerica-west1  # Santiago
-
-gcloud config set project $PROJECT
-gcloud services enable run.googleapis.com sqladmin.googleapis.com artifactregistry.googleapis.com
-
-# 1) Base de datos: Cloud SQL Postgres (instancia más pequeña)
-gcloud sql instances create feriakl-db --database-version=POSTGRES_16 \
-  --tier=db-f1-micro --region=$REGION
-gcloud sql databases create feriakl --instance=feriakl-db
-gcloud sql users create feriakl --instance=feriakl-db --password=TU_CLAVE_DB
-
-# 2) Guarda el SECRET_KEY como secreto
-echo -n "$(openssl rand -hex 32)" | gcloud secrets create feriakl-secret --data-file=-
-
-# 3) Despliega (backend + frontend en una sola imagen).
-#    OJO: el contexto es la RAÍZ del repo (no backend/), porque la imagen
-#    incluye el frontend. Se usa el Dockerfile de la raíz.
-gcloud run deploy feriakl \
-  --source . \
-  --region $REGION \
-  --allow-unauthenticated \
-  --add-cloudsql-instances $PROJECT:$REGION:feriakl-db \
-  --set-secrets SECRET_KEY=feriakl-secret:latest \
-  --set-env-vars "DATABASE_URL=postgresql+psycopg2://feriakl:TU_CLAVE_DB@/feriakl?host=/cloudsql/$PROJECT:$REGION:feriakl-db"
+PROJECT=tu-proyecto REGION=southamerica-west1 bash deploy.sh
 ```
 
-Cloud Run te entrega una URL `https://feriakl-....run.app` que sirve **la app y el API juntos**, ya con **HTTPS y certificado válido automático** (la cámara funcionará sin avisos).
+El script (`../deploy.sh`):
+1. Habilita las APIs necesarias.
+2. Crea la base **Firestore (Native)**.
+3. Genera y guarda **SECRET_KEY** y la **contraseña inicial del admin** en Secret Manager (te la muestra una vez).
+4. Da permisos de Firestore/secretos a la cuenta de servicio de Cloud Run.
+5. Despliega (build del `Dockerfile` de la raíz, que empaqueta backend + frontend).
+6. Imprime la **URL pública** (`https://feriakl-….run.app`).
 
-## Certificados / HTTPS en producción
+### Certificados / HTTPS
+Automáticos: Cloud Run entrega TLS con certificado administrado por Google. Para dominio propio:
+`gcloud beta run domain-mappings create --service feriakl --domain app.tudominio.cl --region $REGION`.
 
-No se suben certificados manualmente:
-
-- **URL `*.run.app`**: Cloud Run la entrega con TLS y **certificado administrado por Google** (confiable, auto-renovado). Cero configuración.
-- **Dominio propio** (ej. `app.feriakl.cl`): al mapearlo, Google **provisiona y renueva** un certificado administrado gratis:
-  ```bash
-  gcloud beta run domain-mappings create --service feriakl --domain app.feriakl.cl --region $REGION
-  # Luego agrega en tu DNS los registros que el comando indique. El certificado
-  # queda activo (estado "Certificate provisioned") en unos minutos a ~1 hora.
-  ```
-
-> El certificado autofirmado de `backend/certs/` es **solo para probar la cámara en el celular en red local**. No se usa ni se sube a producción (está en `.gitignore` y `.gcloudignore`).
-
-> **Costos:** Cloud Run escala a cero (pagas casi nada con tráfico bajo). Cloud SQL `db-f1-micro` tiene un costo base mensual (~USD 8–10); si quieres evitarlo al inicio, puedes mantener SQLite en una sola instancia, pero pierdes el multi-dispositivo. Lo conversamos.
+### Costos
+Cloud Run escala a cero y Firestore tiene cuota diaria gratis (1 GiB, 50K lecturas / 20K escrituras al día). Para un puesto, se mantiene en **USD 0**.
