@@ -451,6 +451,7 @@
         <button type="button" class="btn ghost" onclick="cerrarProdModal()">Cancelar</button>
         <button type="submit" class="btn" id="pSubmit">Crear producto</button>
       </div>
+      <button type="button" class="btn red" id="pDelete" style="display:none;width:100%;margin-top:10px" onclick="eliminarProducto()">🗑️ Eliminar producto</button>
     </form>
   </div>
 
@@ -784,6 +785,7 @@ function nuevoProducto(){
   document.getElementById('prodForm').reset();
   document.getElementById('prodTitle').textContent = 'Nuevo producto';
   document.getElementById('pSubmit').textContent = 'Crear producto';
+  document.getElementById('pDelete').style.display = 'none';
   document.getElementById('pCat').value = 'General';
   document.getElementById('pCosto').value = '0';
   document.getElementById('pStock').value = '0';
@@ -798,6 +800,7 @@ function editProducto(id){
   document.getElementById('prodForm').reset();
   document.getElementById('prodTitle').textContent = 'Editar producto';
   document.getElementById('pSubmit').textContent = 'Guardar cambios';
+  document.getElementById('pDelete').style.display = 'block';
   document.getElementById('pName').value = p.nombre;
   document.getElementById('pBarcode').value = p.barcode || '';
   document.getElementById('pCat').value = p.cat || 'General';
@@ -809,6 +812,21 @@ function editProducto(id){
   document.getElementById('prodModal').style.display = 'flex';
 }
 function cerrarProdModal(){ document.getElementById('prodModal').style.display = 'none'; }
+async function eliminarProducto(){
+  if(!prodEditId) return;
+  if(currentUser && currentUser.role!=='admin') return toast('Solo el administrador puede eliminar productos', true);
+  const p = productos.find(x=>x.id===prodEditId);
+  const nombre = p ? p.nombre : 'este producto';
+  if(!confirm('¿Eliminar "'+nombre+'" del inventario?\nEsta acción no se puede deshacer (el historial de ventas se conserva).')) return;
+  const btn = document.getElementById('pDelete'), err = document.getElementById('pErr');
+  err.textContent=''; btn.disabled=true; btn.textContent='Eliminando...';
+  try {
+    await api('/products/' + encodeURIComponent(prodEditId), { method:'DELETE' });
+    cerrarProdModal(); toast('Producto eliminado');
+    await loadProducts(); renderInventory(); renderPOS(); loadDashboard();
+  } catch(ex){ err.textContent = ex.message; }
+  finally { btn.disabled=false; btn.textContent='🗑️ Eliminar producto'; }
+}
 
 /* ===== Escáner de código de barra =====
    - Motor: API nativa BarcodeDetector (rápida en Chrome Android) o ZXing (respaldo PC).

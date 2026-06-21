@@ -57,3 +57,14 @@ def update_product(product_id: str, data: schemas.ProductUpdate, _: dict = Depen
     if cambios:
         ref.update(cambios)
     return schemas.ProductOut(**store.doc_to_dict(ref.get()))
+
+
+@router.delete("/{product_id}", status_code=204)
+def delete_product(product_id: str, _: dict = Depends(require_admin)):
+    # Las ventas guardan su propia copia del nombre/precio, así que borrar el
+    # producto no afecta el historial ni los reportes.
+    ref = store.col(store.PRODUCTS).document(product_id)
+    if not ref.get().exists:
+        raise HTTPException(status_code=404, detail="Producto no encontrado")
+    ref.delete()
+    return None
