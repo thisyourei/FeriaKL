@@ -1,15 +1,24 @@
 """Ventas (POS). Crear una venta descuenta stock con una transacción de Firestore."""
 from datetime import datetime, timezone
 
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, HTTPException, Response
 from google.cloud import firestore
 from google.cloud.firestore_v1 import FieldFilter
 
 from .. import schemas
 from .. import db as store
+from .. import receipt
+from ..config import settings
 from ..auth import get_current_user, require_admin
 
 router = APIRouter(prefix="/sales", tags=["ventas"])
+
+
+def _get_sale_or_404(sale_id: str) -> dict:
+    snap = store.col(store.SALES).document(sale_id).get()
+    if not snap.exists:
+        raise HTTPException(status_code=404, detail="Venta no encontrada")
+    return store.doc_to_dict(snap)
 
 
 @router.post("", response_model=schemas.SaleOut, status_code=201)
@@ -47,7 +56,8 @@ def create_sale(data: schemas.SaleCreate, user: dict = Depends(get_current_user)
             txn.update(refs[pid], {"stock": nuevo})
         sale_ref = store.col(store.SALES).document()
         doc = {"user_id": user["id"], "metodo_pago": data.metodo_pago, "total": total,
-               "items": items_out, "created_at": datetime.now(timezone.utc)}
+               "items": items_out, "pagado_con": data.pagado_con,
+               "created_at": datetime.now(timezone.utc)}
         txn.set(sale_ref, doc)
         doc["id"] = sale_ref.id
         resultado.update(doc)
@@ -113,3 +123,30 @@ def annul_sale(sale_id: str, admin: dict = Depends(require_admin)):
 
     _anular(transaction)
     return schemas.SaleOut(**resultado)
+
+
+@router.get("/{sale_id}/receipt.pdf")
+def receipt_pdf(sale_id: str, _: dict = Depends(get_current_user)):
+    """Boleta de la venta en PDF (para compartir por WhatsApp o descargar)."""
+    sale = _get_sale_or_404(sale_id)
+    pdf = receipt.build_pdf(sale, settings.business_name)
+    f = receipt.folio(sale)
+    return Response(
+        content=pdf,
+        media_type="application/pdf",
+        headers={"Content-Disposition": f'inline; filename="boleta-{f}.pdf"'},
+    )
+
+
+@router.post("/{sale_id}/email", status_code=204)
+def receipt_email(sale_id: str, data: schemas.EmailReceipt, _: dict = Depends(get_current_user)):
+    """Envía la boleta en PDF al correo indicado."""
+    sale = _get_sale_or_404(sale_id)
+    pdf = receipt.build_pdf(sale, settings.business_name)
+    try:
+        receipt.send_receipt_email(data.email, sale, pdf, settings)
+    except ValueError as e:  # SMTP no configurado / remitente faltante
+        raise HTTPException(status_code=400, detail=str(e))
+    except Exception as e:   # fallos de red/credenciales SMTP
+        raise HTTPException(status_code=502, detail=f"No se pudo enviar el correo: {e}")
+    return None

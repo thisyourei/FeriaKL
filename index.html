@@ -189,7 +189,7 @@
   .toast {
     position: fixed; left:50%; bottom: calc(96px + env(safe-area-inset-bottom)); transform: translateX(-50%) translateY(20px);
     background: var(--text); color:#fff; padding: 12px 20px; border-radius: 30px; font-size:14.5px; font-weight:600;
-    box-shadow: 0 6px 20px rgba(0,0,0,.25); z-index: 90; opacity:0; pointer-events:none; transition: all .25s; white-space:nowrap;
+    box-shadow: 0 6px 20px rgba(0,0,0,.25); z-index: 250; opacity:0; pointer-events:none; transition: all .25s; white-space:nowrap;
   }
   .toast.show { opacity:1; transform: translateX(-50%) translateY(0); }
   .toast.err { background: var(--red); }
@@ -214,6 +214,27 @@
   .pay-change b { font-size:26px; font-variant-numeric:tabular-nums; color:var(--text); }
   .pay-change.ok b { color:var(--green-dark); }
   .pay-change.short b { color:var(--red); }
+  /* Boleta digital */
+  .receipt-overlay { position:fixed; inset:0; z-index:200; background:rgba(15,30,20,.55); display:flex; align-items:center; justify-content:center; padding:18px; }
+  .receipt-card { width:100%; max-width:360px; display:flex; flex-direction:column; gap:10px; max-height:100%; }
+  .receipt-paper { background:#fff; border-radius:14px; padding:20px 18px; box-shadow:0 20px 50px rgba(0,0,0,.3); overflow-y:auto; }
+  .rcp-brand { text-align:center; font-size:22px; font-weight:800; letter-spacing:.02em; color:var(--green-dark); }
+  .rcp-sub { text-align:center; font-size:12px; color:var(--muted); }
+  .rcp-sep { border-top:1px dashed var(--border); margin:12px 0; }
+  .rcp-item, .rcp-line, .rcp-total { display:flex; justify-content:space-between; gap:12px; font-size:14px; margin:5px 0; }
+  .rcp-item span:last-child, .rcp-line span:last-child { font-variant-numeric:tabular-nums; white-space:nowrap; }
+  .rcp-line { color:var(--muted); font-size:13px; }
+  .rcp-total { font-size:19px; font-weight:800; margin-top:4px; }
+  .rcp-total span:last-child { font-variant-numeric:tabular-nums; }
+  .rcp-thanks { text-align:center; font-size:13px; color:var(--muted); margin-top:14px; font-style:italic; }
+  .receipt-wsp { width:100%; padding:15px; font-size:16px; background:#25d366; box-shadow:0 3px 10px rgba(37,211,102,.35); }
+  .receipt-wsp:hover { background:#1ebe5b; }
+  .receipt-mailrow { display:flex; gap:8px; }
+  .receipt-mailrow input { flex:1; padding:12px 13px; border:1px solid var(--border); border-radius:10px; font-size:15px; background:#fff; }
+  .receipt-mailrow input:focus { outline:none; border-color:var(--green); box-shadow:0 0 0 3px var(--green-light); }
+  .receipt-mailrow .btn { white-space:nowrap; padding:0 16px; }
+  .receipt-back { width:100%; background:#fff; color:var(--text); border:1px solid var(--border); }
+  .receipt-back:hover { background:var(--bg); }
   /* Editar producto en inventario */
   tr.row-edit { cursor:pointer; }
   tr.row-edit:hover { background:var(--green-light); }
@@ -492,6 +513,19 @@
     </form>
   </div>
 
+  <!-- Boleta digital (tras cada venta) -->
+  <div class="receipt-overlay" id="receiptOverlay" style="display:none">
+    <div class="receipt-card">
+      <div class="receipt-paper" id="receiptPaper"></div>
+      <button class="btn receipt-wsp" onclick="compartirBoletaWsp()">📲 Enviar por WhatsApp (PDF)</button>
+      <div class="receipt-mailrow">
+        <input id="receiptEmail" type="email" inputmode="email" autocomplete="off" placeholder="correo@cliente.cl">
+        <button class="btn ghost" id="receiptMailSend" onclick="enviarBoletaCorreo()">✉️ Enviar</button>
+      </div>
+      <button class="btn receipt-back" onclick="cerrarBoleta()">← Nueva venta</button>
+    </div>
+  </div>
+
   <!-- Overlay del escáner de código de barra -->
   <div class="scan-overlay" id="scanOverlay" style="display:none">
     <div class="scan-head"><span id="scanTitle">Escanear código</span><button class="scan-close" onclick="stopScan()">✕</button></div>
@@ -539,6 +573,23 @@ async function api(path, { method=null, body=null, form=null } = {}){
   if (res.status === 401) { doLogout(); throw new Error('Sesión expirada, vuelve a entrar'); }
   if (!res.ok) { const err = await res.json().catch(()=>({})); throw new Error(err.detail || ('Error '+res.status)); }
   return res.status === 204 ? null : res.json();
+}
+// Igual que api() pero devuelve un Blob (para descargar/compartir el PDF de la boleta).
+async function apiBlob(path){
+  const headers = {};
+  if (token) headers['Authorization'] = 'Bearer ' + token;
+  let res;
+  try { res = await fetch(API + path, { headers }); }
+  catch(e){ throw new Error('No hay conexión con el servidor.'); }
+  if (res.status === 401) { doLogout(); throw new Error('Sesión expirada, vuelve a entrar'); }
+  if (!res.ok) { throw new Error('Error ' + res.status); }
+  return res.blob();
+}
+function descargarBlob(blob, nombre){
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  a.href = url; a.download = nombre; document.body.appendChild(a); a.click(); a.remove();
+  setTimeout(()=>URL.revokeObjectURL(url), 4000);
 }
 
 /* ===== Toast (aviso flotante) ===== */
@@ -685,17 +736,19 @@ function cobrar(metodo){
 }
 
 // Registra la venta en el backend (común a efectivo y transferencia).
-async function finalizarVenta(metodo, btn){
+async function finalizarVenta(metodo, btn, pagadoCon){
   const map = { Efectivo:'efectivo', Transferencia:'transferencia' };
   const items = cart.map(c=>({ product_id:c.id, cantidad:c.qty }));
   if(btn){ btn.disabled=true; btn.textContent='Cobrando...'; }
   try {
-    const sale = await api('/sales', { body:{ metodo_pago: map[metodo], items } });
+    const body = { metodo_pago: map[metodo], items };
+    if(pagadoCon != null) body.pagado_con = pagadoCon;
+    const sale = await api('/sales', { body });
     cart = [];
     cerrarPago();
     await loadProducts(); renderPOS();
     loadDashboard();
-    toast('✅ Venta ' + fmt(sale.total) + ' · ' + metodo);
+    mostrarBoleta(sale);
   } catch(e){ toast('No se pudo cobrar: ' + e.message, true); }
   finally { if(btn){ btn.disabled=false; btn.textContent='Confirmar venta'; } }
 }
@@ -736,8 +789,74 @@ document.getElementById('payForm').addEventListener('submit', e=>{
   const err = document.getElementById('payErr');
   if(paga && paga < total){ err.textContent = 'El monto recibido es menor al total.'; return; }
   err.textContent = '';
-  finalizarVenta('Efectivo', document.getElementById('paySubmit'));
+  finalizarVenta('Efectivo', document.getElementById('paySubmit'), paga || null);
 });
+
+/* ---------- Boleta digital: se muestra tras cada venta ---------- */
+let ultimaVenta = null, boletaPdfBlob = null;
+const NEGOCIO = 'Yokai APP';
+function folioDe(v){ return String(v && v.id || '').slice(-6).toUpperCase() || '000000'; }
+
+function mostrarBoleta(sale){
+  ultimaVenta = sale; boletaPdfBlob = null;
+  const f = folioDe(sale);
+  const fecha = new Date(sale.created_at).toLocaleString('es-CL',{day:'numeric',month:'short',year:'numeric',hour:'2-digit',minute:'2-digit'});
+  const filas = sale.items.map(i=>
+    `<div class="rcp-item"><span>${i.cantidad} × ${esc(i.nombre)}</span><span>${fmt(i.subtotal)}</span></div>`).join('');
+  const pago = sale.metodo_pago.charAt(0).toUpperCase()+sale.metodo_pago.slice(1);
+  let extra = '';
+  if(sale.metodo_pago==='efectivo' && sale.pagado_con){
+    const vuelto = Math.max(sale.pagado_con - sale.total, 0);
+    extra = `<div class="rcp-line"><span>Paga con</span><span>${fmt(sale.pagado_con)}</span></div>
+             <div class="rcp-line"><span>Vuelto</span><span>${fmt(vuelto)}</span></div>`;
+  }
+  document.getElementById('receiptPaper').innerHTML =
+    `<div class="rcp-brand">${esc(NEGOCIO)}</div>
+     <div class="rcp-sub">Boleta #${f}</div>
+     <div class="rcp-sub">${fecha}</div>
+     <div class="rcp-sep"></div>${filas}<div class="rcp-sep"></div>
+     <div class="rcp-total"><span>TOTAL</span><span>${fmt(sale.total)}</span></div>
+     <div class="rcp-line"><span>Pago</span><span>${pago}</span></div>${extra}
+     <div class="rcp-thanks">¡Gracias por su compra!</div>`;
+  document.getElementById('receiptEmail').value = '';
+  document.getElementById('receiptOverlay').style.display = 'flex';
+  // Pre-cargamos el PDF para que compartir sea instantáneo (mantiene la activación del gesto).
+  apiBlob('/sales/' + encodeURIComponent(sale.id) + '/receipt.pdf').then(b=>{ boletaPdfBlob = b; }).catch(()=>{});
+}
+function cerrarBoleta(){ document.getElementById('receiptOverlay').style.display = 'none'; }
+
+async function compartirBoletaWsp(){
+  if(!ultimaVenta) return;
+  const f = folioDe(ultimaVenta);
+  try {
+    let blob = boletaPdfBlob;
+    if(!blob) blob = await apiBlob('/sales/' + encodeURIComponent(ultimaVenta.id) + '/receipt.pdf');
+    const file = new File([blob], 'boleta-' + f + '.pdf', { type:'application/pdf' });
+    if(navigator.canShare && navigator.canShare({ files:[file] })){
+      await navigator.share({ files:[file], title:'Boleta ' + NEGOCIO + ' #' + f });
+    } else {
+      // Respaldo (PC/sin soporte): descarga el PDF y abre WhatsApp con un texto.
+      descargarBlob(blob, 'boleta-' + f + '.pdf');
+      window.open('https://wa.me/?text=' + encodeURIComponent('Boleta ' + NEGOCIO + ' #' + f + ' · Total ' + fmt(ultimaVenta.total) + ' (adjunto el PDF descargado)'), '_blank');
+    }
+  } catch(e){
+    if(e && e.name==='AbortError') return;   // el usuario canceló el menú de compartir
+    toast('No se pudo compartir: ' + e.message, true);
+  }
+}
+async function enviarBoletaCorreo(){
+  if(!ultimaVenta) return;
+  const email = document.getElementById('receiptEmail').value.trim();
+  if(!/^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(email)){ toast('Escribe un correo válido', true); return; }
+  const btn = document.getElementById('receiptMailSend');
+  btn.disabled=true; btn.textContent='Enviando...';
+  try {
+    await api('/sales/' + encodeURIComponent(ultimaVenta.id) + '/email', { body:{ email } });
+    toast('✉️ Boleta enviada a ' + email);
+    document.getElementById('receiptEmail').value = '';
+  } catch(e){ toast('No se pudo enviar: ' + e.message, true); }
+  finally { btn.disabled=false; btn.textContent='✉️ Enviar'; }
+}
 
 /* ---------- Render Inventario ---------- */
 function renderInventory(){

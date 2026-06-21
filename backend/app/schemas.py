@@ -87,6 +87,11 @@ class SaleItemIn(BaseModel):
 class SaleCreate(BaseModel):
     metodo_pago: str = Field(pattern="^(efectivo|transferencia)$")
     items: list[SaleItemIn] = Field(min_length=1, max_length=200)
+    pagado_con: float | None = Field(default=None, ge=0, le=99_999_999)  # efectivo recibido (para el vuelto)
+
+
+class EmailReceipt(BaseModel):
+    email: EmailStr
 
 
 class SaleItemOut(BaseModel):
@@ -103,6 +108,7 @@ class SaleOut(BaseModel):
     total: float
     created_at: datetime
     items: list[SaleItemOut]
+    pagado_con: float | None = None
     anulada: bool = False
 
 

@@ -27,6 +27,17 @@ class Settings(BaseSettings):
     # Carpeta del frontend. Vacío = autodetecta (raíz del repo en local); en el contenedor: FRONTEND_DIR.
     frontend_dir: str = ""
 
+    # --- Boleta / correo ---
+    # Nombre de fantasía que encabeza la boleta digital.
+    business_name: str = "Yokai APP"
+    # SMTP para enviar la boleta en PDF por correo. Si smtp_host está vacío, el envío
+    # por correo queda deshabilitado (la app igual permite compartir el PDF por WhatsApp).
+    smtp_host: str = ""
+    smtp_port: int = 587
+    smtp_user: str = ""
+    smtp_password: str = ""
+    smtp_from: str = ""   # remitente; si está vacío se usa smtp_user
+
     # --- Datos iniciales (seed) ---
     seed_admin_email: str = "admin@feriakl.cl"
     seed_admin_password: str = ""   # si está vacío en producción, NO se crea admin con clave por defecto
