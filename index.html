@@ -120,25 +120,25 @@
     font-size:13.5px; font-weight:600; cursor:pointer; transition: all .15s; }
   .chip:hover { border-color: var(--green); }
   .chip.active { background: var(--green); color:#fff; border-color: var(--green); }
-  .prod-grid { display:grid; grid-template-columns: repeat(auto-fill,minmax(132px,1fr)); gap: 12px; }
+  .prod-grid { display:grid; grid-template-columns: repeat(auto-fill,minmax(110px,1fr)); gap: 8px; }
   .prod-tile {
-    background: var(--card); border:1px solid var(--border); border-radius: 14px; padding: 16px 12px;
+    background: var(--card); border:1px solid var(--border); border-radius: 10px; padding: 10px 8px;
     cursor: pointer; text-align:center; box-shadow: var(--shadow); transition: transform .1s, border-color .15s, box-shadow .15s;
     position: relative; overflow: hidden;
   }
-  .prod-tile:hover { transform: translateY(-3px); border-color: var(--green); box-shadow: 0 6px 16px rgba(46,125,50,.15); }
+  .prod-tile:hover { transform: translateY(-2px); border-color: var(--green); box-shadow: 0 4px 12px rgba(46,125,50,.15); }
   .prod-tile:active { transform: scale(.97); }
-  .prod-tile .emoji { font-size: 34px; line-height:1; }
-  .prod-tile .pname { font-weight:700; font-size:14px; margin-top:8px; }
-  .prod-tile .pprice { color: var(--green-dark); font-size: 13.5px; font-weight:600; margin-top:3px; }
+  .prod-tile .emoji { font-size: 26px; line-height:1; }
+  .prod-tile .pname { font-weight:700; font-size:12px; margin-top:5px; }
+  .prod-tile .pprice { color: var(--green-dark); font-size: 12px; font-weight:600; margin-top:2px; }
   .prod-tile .stock-tag { position:absolute; top:8px; right:8px; font-size:10.5px; font-weight:700; padding:2px 7px; border-radius:20px; }
   .stock-tag.low { background:#fff3e0; color:var(--orange); }
   .stock-tag.out { background:#ffebee; color:var(--red); }
-  .cart { background: var(--card); border:1px solid var(--border); border-radius:14px; box-shadow:0 4px 18px rgba(0,0,0,.07); margin-top: 16px; }
+  .cart { background: var(--card); border:1px solid var(--border); border-radius:14px; box-shadow:0 4px 18px rgba(0,0,0,.07); }
   .cart-head { padding: 15px 18px; border-bottom:1px solid var(--border); font-weight:700; font-size:15px; display:flex; justify-content:space-between; align-items:center;
     background: var(--green-dark); color:#fff; border-radius:14px 14px 0 0; }
   .cart-pill { background: var(--orange); color:#fff; min-width:24px; height:24px; padding:0 7px; border-radius:20px; font-size:13px; display:flex; align-items:center; justify-content:center; }
-  .cart-items { max-height: 340px; overflow-y:auto; }
+  .cart-items { max-height: 480px; overflow-y:auto; }
   .cart-row { display:flex; justify-content:space-between; align-items:center; padding: 11px 18px; border-bottom:1px solid var(--border); font-size:14px; }
   .cart-row .x { color: var(--red); cursor:pointer; font-weight:700; padding: 0 4px; }
   .cart-empty { padding: 44px 18px; text-align:center; color: var(--muted); font-size:14.5px; line-height:1.5; }
@@ -153,8 +153,6 @@
   .search { padding: 9px 14px; border:1px solid var(--border); border-radius:8px; font-size:14px; width: 220px; }
   .progress { height: 6px; background: var(--border); border-radius: 6px; overflow:hidden; margin-top: 8px; }
   .progress > div { height:100%; background: var(--green); }
-  /* Mobile-first: el POS apila la grilla; el carrito va debajo */
-  .pos { display: block; }
   .cards { grid-template-columns: 1fr 1fr; }
   /* Tablas anchas: permitir scroll horizontal dentro del panel en pantallas chicas */
   @media (max-width: 560px) {
@@ -205,7 +203,17 @@
   .modal-actions { display:flex; gap:10px; margin-top:18px; }
   .modal-actions .btn { flex:1; }
   /* Botón escanear en POS */
-  .scan-btn { width:100%; margin-bottom:12px; padding:14px; font-size:15.5px; background:var(--green-dark); box-shadow:0 3px 10px rgba(27,94,32,.3); }
+  .scan-btn { width:100%; margin-bottom:12px; padding:16px; font-size:16px; background:var(--green-dark); box-shadow:0 3px 10px rgba(27,94,32,.3); }
+  /* Sección de productos manual — colapsable */
+  .prod-section { border:1px solid var(--border); border-radius:12px; background:var(--card); margin-top:14px; overflow:hidden; }
+  .prod-section summary {
+    padding:13px 16px; font-size:14px; font-weight:600; color:var(--muted);
+    cursor:pointer; list-style:none; display:flex; align-items:center; gap:8px; user-select:none;
+  }
+  .prod-section summary::-webkit-details-marker { display:none; }
+  .prod-section summary::after { content:'›'; margin-left:auto; font-size:18px; transition:transform .2s; }
+  .prod-section[open] summary::after { transform:rotate(90deg); }
+  .prod-section-body { padding:12px; }
   /* Overlay del escáner (pantalla completa) */
   .scan-overlay { position:fixed; inset:0; z-index:120; background:#000; display:flex; flex-direction:column; }
   .scan-head { display:flex; justify-content:space-between; align-items:center; color:#fff; padding:calc(14px + env(safe-area-inset-top)) 18px 14px; font-size:16px; font-weight:700; background:rgba(0,0,0,.6); }
@@ -281,27 +289,33 @@
 
     <!-- POS -->
     <section class="view active" id="pos">
-      <div class="pos">
-        <div>
-          <button class="btn scan-btn" onclick="scanToCart()">📷 Escanear código de barra</button>
-          <div style="margin-bottom:12px"><input class="search" style="width:100%" id="posSearch" placeholder="🔍 Buscar producto..." oninput="renderPOS()"></div>
+      <!-- Botón escanear: acción principal -->
+      <button class="btn scan-btn" onclick="scanToCart()">📷 Escanear código de barra</button>
+
+      <!-- Carrito: ahora primero y prominente -->
+      <div class="cart">
+        <div class="cart-head"><span>🛒 Carrito</span><span class="cart-pill" id="cartCount">0</span></div>
+        <div class="cart-items" id="cartItems"><div class="cart-empty">📷 Escanea un código<br>o agrega productos abajo</div></div>
+        <div class="cart-total">
+          <div class="line"><span>Productos</span><span id="cartSub">$0</span></div>
+          <div class="line grand"><span>TOTAL</span><span id="cartGrand">$0</span></div>
+          <div class="pay">
+            <button class="btn pay-cash" onclick="cobrar('Efectivo')">💵 Cobrar efectivo</button>
+            <button class="btn ghost" onclick="cobrar('Transferencia')">📲 Transferencia</button>
+          </div>
+          <button class="cart-clear" id="cartClear" onclick="cart=[];renderCart()" hidden>Vaciar carrito</button>
+        </div>
+      </div>
+
+      <!-- Productos: secundario, colapsable -->
+      <details class="prod-section">
+        <summary>🔍 Agregar producto manualmente</summary>
+        <div class="prod-section-body">
+          <div style="margin-bottom:10px"><input class="search" style="width:100%" id="posSearch" placeholder="🔍 Buscar producto..." oninput="renderPOS()"></div>
           <div class="chips" id="posChips"></div>
           <div class="prod-grid" id="posGrid"></div>
         </div>
-        <div class="cart">
-          <div class="cart-head"><span>🛒 Carrito</span><span class="cart-pill" id="cartCount">0</span></div>
-          <div class="cart-items" id="cartItems"><div class="cart-empty">👆 Toca un producto<br>para empezar a vender</div></div>
-          <div class="cart-total">
-            <div class="line"><span>Productos</span><span id="cartSub">$0</span></div>
-            <div class="line grand"><span>TOTAL</span><span id="cartGrand">$0</span></div>
-            <div class="pay">
-              <button class="btn pay-cash" onclick="cobrar('Efectivo')">💵 Cobrar efectivo</button>
-              <button class="btn ghost" onclick="cobrar('Transferencia')">📲 Transferencia</button>
-            </div>
-            <button class="cart-clear" id="cartClear" onclick="cart=[];renderCart()" hidden>Vaciar carrito</button>
-          </div>
-        </div>
-      </div>
+      </details>
     </section>
 
     <!-- INVENTORY -->
@@ -572,7 +586,7 @@ function chQty(id,sign){ const c=cart.find(x=>x.id===id); if(!c) return; c.qty=+
 function rmCart(id){ cart=cart.filter(x=>x.id!==id); renderCart(); }
 function renderCart(){
   const items = document.getElementById('cartItems');
-  if(!cart.length){ items.innerHTML='<div class="cart-empty">👆 Toca un producto<br>para empezar a vender</div>'; }
+  if(!cart.length){ items.innerHTML='<div class="cart-empty">📷 Escanea un código<br>o agrega productos abajo</div>'; }
   else items.innerHTML = cart.map(c=>{
     const cant = c.unidad==='kg' ? c.qty.toLocaleString('es-CL') : c.qty;
     return `<div class="cart-row"><div><div><b>${c.emoji} ${c.nombre}</b></div>
