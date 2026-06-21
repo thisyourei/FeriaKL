@@ -483,9 +483,9 @@
           <select id="pUnidad"><option value="un">un</option><option value="kg">kg</option></select></div>
       </div>
       <div style="display:flex; gap:10px">
-        <div style="flex:1"><label for="pPrecio">Precio venta</label><input id="pPrecio" inputmode="numeric" placeholder="$" required></div>
-        <div style="flex:1"><label for="pCosto">Costo</label><input id="pCosto" inputmode="numeric" placeholder="$" value="0"></div>
-        <div style="width:90px"><label for="pStock">Stock</label><input id="pStock" inputmode="numeric" value="0"></div>
+        <div style="flex:1"><label for="pPrecio">Precio venta</label><input id="pPrecio" class="clear-zero" inputmode="numeric" placeholder="$" required></div>
+        <div style="flex:1"><label for="pCosto">Costo</label><input id="pCosto" class="clear-zero" inputmode="numeric" placeholder="$" value="0"></div>
+        <div style="width:90px"><label for="pStock">Stock</label><input id="pStock" class="clear-zero" inputmode="numeric" value="0"></div>
       </div>
       <div class="modal-err" id="pErr"></div>
       <div class="modal-actions">
@@ -1396,6 +1396,15 @@ document.getElementById('loginForm').addEventListener('submit', async e=>{
   try { await doLogin(document.getElementById('loginEmail').value.trim(), document.getElementById('loginPass').value); }
   catch(ex){ err.textContent = ex.message; }
   finally { btn.disabled=false; btn.textContent='Entrar'; }
+});
+
+/* Campos numéricos (.clear-zero): al enfocar, si valen 0 se limpian; un valor real (ej. 1000) se mantiene y se selecciona para editar. */
+document.addEventListener('focusin', e=>{
+  const el = e.target;
+  if(!el || !el.classList || !el.classList.contains('clear-zero')) return;
+  const n = Number(String(el.value).replace(/[^\d.]/g,''));
+  if(!n) el.value = '';            // 0, vacío o no numérico → limpiar
+  else if(el.select) el.select();  // valor real → seleccionar todo para reemplazar/editar fácil
 });
 
 /* Arranque: si hay token guardado, validarlo; si no, mostrar login */
