@@ -55,6 +55,10 @@ class ProductBase(BaseModel):
     stock: float = Field(default=0, ge=0, le=9_999_999)
     stock_min: float = Field(default=0, ge=0, le=9_999_999)
     activo: bool = True
+    # Formato/presentación del producto: litros, kilos o pack, con su cantidad
+    # (litros, kilos, o unidades que componen el pack). Opcional.
+    medida_tipo: str | None = Field(default=None, pattern="^(litros|kilos|pack)$")
+    medida_valor: float | None = Field(default=None, ge=0, le=9_999_999)
 
 
 class ProductCreate(ProductBase):
@@ -72,6 +76,8 @@ class ProductUpdate(BaseModel):
     stock: float | None = Field(default=None, ge=0, le=9_999_999)
     stock_min: float | None = Field(default=None, ge=0, le=9_999_999)
     activo: bool | None = None
+    medida_tipo: str | None = Field(default=None, pattern="^(litros|kilos|pack)$")
+    medida_valor: float | None = Field(default=None, ge=0, le=9_999_999)
 
 
 class ProductOut(ProductBase):

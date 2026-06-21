@@ -131,6 +131,7 @@
   .prod-tile:active { transform: scale(.97); }
   .prod-tile .emoji { font-size: 26px; line-height:1; }
   .prod-tile .pname { font-weight:700; font-size:12px; margin-top:5px; }
+  .prod-tile .pmeta { display:inline-block; margin-top:3px; font-size:10.5px; font-weight:600; color:var(--green-dark); background:var(--green-light); padding:1px 7px; border-radius:20px; }
   .prod-tile .pprice { color: var(--green-dark); font-size: 12px; font-weight:600; margin-top:2px; }
   .prod-tile .stock-tag { position:absolute; top:8px; right:8px; font-size:10.5px; font-weight:700; padding:2px 7px; border-radius:20px; }
   .stock-tag.low { background:#fff3e0; color:var(--orange); }
@@ -483,6 +484,18 @@
           <select id="pUnidad"><option value="un">un</option><option value="kg">kg</option></select></div>
       </div>
       <div style="display:flex; gap:10px">
+        <div style="flex:1"><label for="pMedidaTipo">Formato</label>
+          <select id="pMedidaTipo" onchange="actualizarMedida()">
+            <option value="">— Sin medida</option>
+            <option value="litros">Litros</option>
+            <option value="kilos">Kilos</option>
+            <option value="pack">Pack</option>
+          </select></div>
+        <div style="flex:1; display:none" id="pMedidaValorWrap">
+          <label id="pMedidaValorLabel" for="pMedidaValor">Cantidad</label>
+          <input id="pMedidaValor" class="clear-zero" inputmode="decimal" placeholder="0"></div>
+      </div>
+      <div style="display:flex; gap:10px">
         <div style="flex:1"><label for="pPrecio">Precio venta</label><input id="pPrecio" class="clear-zero" inputmode="numeric" placeholder="$" required></div>
         <div style="flex:1"><label for="pCosto">Costo</label><input id="pCosto" class="clear-zero" inputmode="numeric" placeholder="$" value="0"></div>
         <div style="width:90px"><label for="pStock">Stock</label><input id="pStock" class="clear-zero" inputmode="numeric" value="0"></div>
@@ -550,6 +563,15 @@
 // URL relativa: funciona en local y en Cloud Run sin cambiar nada.
 const API = '';
 const fmt = n => '$' + Math.round(n).toLocaleString('es-CL');
+// Formato/presentación del producto en texto corto: "5 L", "1 Kg", "Pack 6".
+function medidaTxt(p){
+  if(!p || !p.medida_tipo || !p.medida_valor) return '';
+  const v = Number(p.medida_valor).toLocaleString('es-CL');
+  if(p.medida_tipo==='litros') return v + ' L';
+  if(p.medida_tipo==='kilos') return v + ' Kg';
+  if(p.medida_tipo==='pack') return 'Pack ' + v;
+  return '';
+}
 // Escapa texto que viene de la base antes de insertarlo como HTML (previene XSS almacenado).
 const esc = s => String(s == null ? '' : s).replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
 
@@ -694,8 +716,10 @@ function renderPOS(){
       let tag = '';
       if(p.stock<=0) tag='<span class="stock-tag out">Agotado</span>';
       else if(p.stock<=p.min) tag=`<span class="stock-tag low">Quedan ${p.stock}</span>`;
+      const med = medidaTxt(p);
       return `<div class="prod-tile" style="${dis?'opacity:.5;pointer-events:none':''}" data-id="${esc(p.id)}" onclick="addCart(this.dataset.id)">
         ${tag}<div class="emoji">${esc(p.emoji)}</div><div class="pname">${esc(p.nombre)}</div>
+        ${med?`<div class="pmeta">${esc(med)}</div>`:''}
         <div class="pprice">${fmt(p.precio)}/${esc(p.unidad)}</div></div>`;
     }).join('') || '<div style="color:var(--muted);padding:20px">Sin productos en esta categoría.</div>';
   renderCart();
@@ -866,7 +890,9 @@ function renderInventory(){
     const [c,t]=estado(p); const margen=Math.round((p.precio-p.costo)/p.precio*100);
     const click = esAdmin ? ` class="row-edit" data-id="${esc(p.id)}" onclick="editProducto(this.dataset.id)"` : '';
     const lapiz = esAdmin ? '<span class="edit-ico">✏️</span>' : '';
-    return `<tr${click}><td>${esc(p.emoji)} ${esc(p.nombre)}${lapiz}</td><td style="font-variant-numeric:tabular-nums;color:var(--muted)">${esc(p.barcode)||'—'}</td><td class="num">${fmt(p.precio)}</td><td class="num">${fmt(p.costo)}</td>
+    const med = medidaTxt(p);
+    const medTag = med ? ` <span style="color:var(--muted);font-size:12px">· ${esc(med)}</span>` : '';
+    return `<tr${click}><td>${esc(p.emoji)} ${esc(p.nombre)}${medTag}${lapiz}</td><td style="font-variant-numeric:tabular-nums;color:var(--muted)">${esc(p.barcode)||'—'}</td><td class="num">${fmt(p.precio)}</td><td class="num">${fmt(p.costo)}</td>
       <td class="num">${margen}%</td><td class="num">${p.stock} ${esc(p.unidad)}</td><td><span class="badge ${c}">${t}</span></td></tr>`;
   }).join('');
 }
@@ -1005,8 +1031,20 @@ function nuevoProducto(){
   document.getElementById('pCat').value = 'General';
   document.getElementById('pCosto').value = '0';
   document.getElementById('pStock').value = '0';
+  document.getElementById('pMedidaTipo').value = '';
+  document.getElementById('pMedidaValor').value = '';
+  actualizarMedida();
   document.getElementById('pErr').textContent = '';
   document.getElementById('prodModal').style.display = 'flex';
+}
+// Muestra/oculta el campo de cantidad y cambia su etiqueta según el formato elegido.
+function actualizarMedida(){
+  const tipo = document.getElementById('pMedidaTipo').value;
+  const wrap = document.getElementById('pMedidaValorWrap');
+  if(!tipo){ wrap.style.display = 'none'; return; }
+  wrap.style.display = 'block';
+  document.getElementById('pMedidaValorLabel').textContent =
+    tipo==='pack' ? 'Unidades del pack' : (tipo==='litros' ? 'Litros' : 'Kilos');
 }
 function editProducto(id){
   if(currentUser && currentUser.role!=='admin') return toast('Solo el administrador puede editar productos', true);
@@ -1024,6 +1062,9 @@ function editProducto(id){
   document.getElementById('pPrecio').value = p.precio;
   document.getElementById('pCosto').value = p.costo;
   document.getElementById('pStock').value = p.stock;
+  document.getElementById('pMedidaTipo').value = p.medida_tipo || '';
+  document.getElementById('pMedidaValor').value = (p.medida_valor != null ? p.medida_valor : '');
+  actualizarMedida();
   document.getElementById('pErr').textContent = '';
   document.getElementById('prodModal').style.display = 'flex';
 }
@@ -1360,6 +1401,10 @@ document.getElementById('prodForm').addEventListener('submit', async e=>{
   err.textContent=''; btn.disabled=true; btn.textContent = editando ? 'Guardando...' : 'Creando...';
   const precio = Number(String(document.getElementById('pPrecio').value).replace(/[^\d]/g,''));
   if(!precio){ err.textContent='Ingresa un precio válido'; btn.disabled=false; btn.textContent=labelBtn; return; }
+  const medidaTipo = document.getElementById('pMedidaTipo').value || null;
+  const medidaValor = medidaTipo
+    ? (Number(String(document.getElementById('pMedidaValor').value).replace(',','.')) || null)
+    : null;
   const payload = {
     nombre: document.getElementById('pName').value.trim(),
     barcode: document.getElementById('pBarcode').value.trim() || null,
@@ -1368,6 +1413,8 @@ document.getElementById('prodForm').addEventListener('submit', async e=>{
     precio,
     costo: Number(String(document.getElementById('pCosto').value).replace(/[^\d]/g,'')) || 0,
     stock: Number(String(document.getElementById('pStock').value).replace(',','.')) || 0,
+    medida_tipo: medidaTipo,
+    medida_valor: medidaValor,
   };
   try {
     let creado = null;
