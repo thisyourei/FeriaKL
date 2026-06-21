@@ -994,9 +994,10 @@ async function registrarMerma(){
 
 /* ===== Nuevo/editar producto (solo admin) — modal con escaneo o tipeo ===== */
 let prodEditId = null;
+let prodOrigenVenta = false;   // true si el modal se abrió desde una venta (al crear, agrega al carrito)
 function nuevoProducto(){
   if(currentUser && currentUser.role!=='admin') return toast('Solo el administrador puede agregar productos', true);
-  prodEditId = null;
+  prodEditId = null; prodOrigenVenta = false;
   document.getElementById('prodForm').reset();
   document.getElementById('prodTitle').textContent = 'Nuevo producto';
   document.getElementById('pSubmit').textContent = 'Crear producto';
@@ -1011,7 +1012,7 @@ function editProducto(id){
   if(currentUser && currentUser.role!=='admin') return toast('Solo el administrador puede editar productos', true);
   const p = productos.find(x=>x.id===id);
   if(!p) return;
-  prodEditId = id;
+  prodEditId = id; prodOrigenVenta = false;
   document.getElementById('prodForm').reset();
   document.getElementById('prodTitle').textContent = 'Editar producto';
   document.getElementById('pSubmit').textContent = 'Guardar cambios';
@@ -1026,7 +1027,7 @@ function editProducto(id){
   document.getElementById('pErr').textContent = '';
   document.getElementById('prodModal').style.display = 'flex';
 }
-function cerrarProdModal(){ document.getElementById('prodModal').style.display = 'none'; }
+function cerrarProdModal(){ document.getElementById('prodModal').style.display = 'none'; prodOrigenVenta = false; }
 async function eliminarProducto(){
   if(!prodEditId) return;
   if(currentUser && currentUser.role!=='admin') return toast('Solo el administrador puede eliminar productos', true);
@@ -1247,9 +1248,27 @@ function scanToCart(){
     } else {
       beep(200, 0.25, 0.1);  // tono grave = no encontrado
       document.getElementById('scanHint').textContent = '❌ Código ' + code + ' no está en el inventario';
-      toast('Código ' + code + ' no registrado', true);
+      const esAdmin = currentUser && currentUser.role === 'admin';
+      if (esAdmin) {
+        // Ofrecer agregarlo sin perder el carrito (el carrito vive en memoria).
+        if (confirm('El código ' + code + ' no está en el inventario.\n¿Quieres agregarlo como producto nuevo? (no perderás el carrito)')) {
+          stopScan();
+          agregarDesdeVenta(code);
+        }
+      } else {
+        toast('Código no registrado. Pídele a un administrador que lo agregue.', true);
+      }
     }
   }, { continuo: true, titulo: 'Escanear para vender' });
+}
+// Abre el modal de producto para crearlo en plena venta, precargado con el código escaneado.
+function agregarDesdeVenta(code){
+  nuevoProducto();                 // modo crear (también resetea el origen)
+  if (currentUser && currentUser.role !== 'admin') return;  // nuevoProducto ya avisó
+  prodOrigenVenta = true;          // al crear, se agrega al carrito y se sigue vendiendo
+  document.getElementById('pBarcode').value = code || '';
+  document.getElementById('pStock').value = '1';   // al menos 1 para poder venderlo de inmediato
+  document.getElementById('pName').focus();
 }
 // Escanear hacia un campo de texto (asignar código a un producto)
 function scanToInput(inputId){
@@ -1351,13 +1370,22 @@ document.getElementById('prodForm').addEventListener('submit', async e=>{
     stock: Number(String(document.getElementById('pStock').value).replace(',','.')) || 0,
   };
   try {
+    let creado = null;
+    const desdeVenta = prodOrigenVenta;   // se pierde al cerrar el modal; lo guardamos
     if(editando){
       await api('/products/' + encodeURIComponent(prodEditId), { method:'PATCH', body: payload });
     } else {
-      await api('/products', { body:{ ...payload, emoji:'🧴' } });
+      creado = await api('/products', { body:{ ...payload, emoji:'🧴' } });
     }
-    cerrarProdModal(); toast(editando ? 'Producto actualizado' : 'Producto agregado');
+    cerrarProdModal();
     await loadProducts(); renderInventory(); renderPOS(); loadDashboard();
+    // Si veníamos de una venta, agregamos el producto recién creado al carrito y seguimos.
+    if(creado && desdeVenta && productos.find(p=>p.id===creado.id)){
+      addCart(creado.id);
+      toast('➕ ' + creado.nombre + ' agregado al carrito');
+    } else {
+      toast(editando ? 'Producto actualizado' : 'Producto agregado');
+    }
   } catch(ex){ err.textContent = ex.message; }
   finally { btn.disabled=false; btn.textContent=labelBtn; }
 });
