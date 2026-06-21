@@ -64,7 +64,7 @@ def build_pdf(sale: dict, business_name: str) -> bytes:
     pdf.set_font("Helvetica", "B", 14)
     pdf.cell(ancho, 7, business_name, align="C", new_x="LMARGIN", new_y="NEXT")
     pdf.set_font("Helvetica", "", 9)
-    pdf.cell(ancho, 5, f"Boleta #{folio(sale)}", align="C", new_x="LMARGIN", new_y="NEXT")
+    pdf.cell(ancho, 5, f"Comprobante #{folio(sale)}", align="C", new_x="LMARGIN", new_y="NEXT")
     fecha = sale.get("created_at")
     if fecha is not None:
         try:
@@ -140,16 +140,16 @@ def send_receipt_email(to_email: str, sale: dict, pdf_bytes: bytes, settings) ->
 
     f = folio(sale)
     msg = EmailMessage()
-    msg["Subject"] = f"Boleta {settings.business_name} #{f}"
+    msg["Subject"] = f"Comprobante {settings.business_name} #{f}"
     msg["From"] = remitente
     msg["To"] = to_email
     msg.set_content(
         f"¡Gracias por su compra en {settings.business_name}!\n\n"
-        f"Adjuntamos su boleta #{f} en PDF.\n"
+        f"Adjuntamos su comprobante #{f} en PDF.\n"
         f"Total: {_money(sale.get('total', 0))}\n"
     )
     msg.add_attachment(pdf_bytes, maintype="application", subtype="pdf",
-                       filename=f"boleta-{f}.pdf")
+                       filename=f"comprobante-{f}.pdf")
 
     if settings.smtp_port == 465:
         ctx = ssl.create_default_context()

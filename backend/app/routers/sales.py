@@ -135,7 +135,7 @@ def receipt_pdf(sale_id: str, _: dict = Depends(get_current_user)):
     return Response(
         content=pdf,
         media_type="application/pdf",
-        headers={"Content-Disposition": f'inline; filename="boleta-{f}.pdf"'},
+        headers={"Content-Disposition": f'inline; filename="comprobante-{f}.pdf"'},
     )
 
 

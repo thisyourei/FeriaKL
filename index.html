@@ -838,7 +838,7 @@ function mostrarBoleta(sale){
   }
   document.getElementById('receiptPaper').innerHTML =
     `<div class="rcp-brand">${esc(NEGOCIO)}</div>
-     <div class="rcp-sub">Boleta #${f}</div>
+     <div class="rcp-sub">Comprobante #${f}</div>
      <div class="rcp-sub">${fecha}</div>
      <div class="rcp-sep"></div>${filas}<div class="rcp-sep"></div>
      <div class="rcp-total"><span>TOTAL</span><span>${fmt(sale.total)}</span></div>
@@ -857,13 +857,13 @@ async function compartirBoletaWsp(){
   try {
     let blob = boletaPdfBlob;
     if(!blob) blob = await apiBlob('/sales/' + encodeURIComponent(ultimaVenta.id) + '/receipt.pdf');
-    const file = new File([blob], 'boleta-' + f + '.pdf', { type:'application/pdf' });
+    const file = new File([blob], 'comprobante-' + f + '.pdf', { type:'application/pdf' });
     if(navigator.canShare && navigator.canShare({ files:[file] })){
-      await navigator.share({ files:[file], title:'Boleta ' + NEGOCIO + ' #' + f });
+      await navigator.share({ files:[file], title:'Comprobante ' + NEGOCIO + ' #' + f });
     } else {
       // Respaldo (PC/sin soporte): descarga el PDF y abre WhatsApp con un texto.
-      descargarBlob(blob, 'boleta-' + f + '.pdf');
-      window.open('https://wa.me/?text=' + encodeURIComponent('Boleta ' + NEGOCIO + ' #' + f + ' · Total ' + fmt(ultimaVenta.total) + ' (adjunto el PDF descargado)'), '_blank');
+      descargarBlob(blob, 'comprobante-' + f + '.pdf');
+      window.open('https://wa.me/?text=' + encodeURIComponent('Comprobante ' + NEGOCIO + ' #' + f + ' · Total ' + fmt(ultimaVenta.total) + ' (adjunto el PDF descargado)'), '_blank');
     }
   } catch(e){
     if(e && e.name==='AbortError') return;   // el usuario canceló el menú de compartir
@@ -878,7 +878,7 @@ async function enviarBoletaCorreo(){
   btn.disabled=true; btn.textContent='Enviando...';
   try {
     await api('/sales/' + encodeURIComponent(ultimaVenta.id) + '/email', { body:{ email } });
-    toast('✉️ Boleta enviada a ' + email);
+    toast('✉️ Comprobante enviado a ' + email);
     document.getElementById('receiptEmail').value = '';
   } catch(e){ toast('No se pudo enviar: ' + e.message, true); }
   finally { btn.disabled=false; btn.textContent='✉️ Enviar'; }
