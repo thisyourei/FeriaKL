@@ -13,7 +13,7 @@ RUN pip install --no-cache-dir -r requirements.txt
 # Backend
 COPY backend/app ./app
 # Frontend (servido por el mismo backend, mismo origen)
-COPY index.html manifest.json sw.js ./
+COPY index.html manifest.json sw.js robots.txt ./
 COPY vendor ./vendor
 
 # El frontend vive aquí dentro de la imagen

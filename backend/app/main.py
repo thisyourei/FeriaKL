@@ -56,6 +56,8 @@ async def security_headers(request: Request, call_next):
     resp.headers["X-Frame-Options"] = "DENY"
     resp.headers["Referrer-Policy"] = "strict-origin-when-cross-origin"
     resp.headers["Permissions-Policy"] = "camera=(self), microphone=(), geolocation=()"
+    # No indexar: la app es privada (solo quien tiene la URL). Evita buscadores/bots.
+    resp.headers["X-Robots-Tag"] = "noindex, nofollow, noarchive"
     resp.headers["Content-Security-Policy"] = CSP
     if settings.is_production:
         resp.headers["Strict-Transport-Security"] = "max-age=31536000; includeSubDomains"

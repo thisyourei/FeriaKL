@@ -49,6 +49,13 @@ gcloud secrets add-iam-policy-binding feriakl-secret-key \
 gcloud secrets add-iam-policy-binding feriakl-admin-password \
   --member="serviceAccount:${RUNTIME_SA}" --role="roles/secretmanager.secretAccessor" >/dev/null
 
+# Cloud Build (deploy --source) usa esta misma cuenta; necesita rol de build + logs.
+echo "==> Dando permisos de build a $RUNTIME_SA ..."
+gcloud projects add-iam-policy-binding "$PROJECT" \
+  --member="serviceAccount:${RUNTIME_SA}" --role="roles/cloudbuild.builds.builder" >/dev/null
+gcloud projects add-iam-policy-binding "$PROJECT" \
+  --member="serviceAccount:${RUNTIME_SA}" --role="roles/logging.logWriter" >/dev/null
+
 echo "==> Desplegando a Cloud Run (build del Dockerfile en la raíz)..."
 gcloud run deploy "$SERVICE" \
   --source . \
