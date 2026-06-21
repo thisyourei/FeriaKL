@@ -1,0 +1,15 @@
+# Archivos que NO se suben al build de Cloud Run.
+.git/
+**/__pycache__/
+**/*.pyc
+backend/.venv/
+venv/
+.venv/
+**/.env
+**/*.db
+backend/certs/
+serve.ps1
+backend/run-https.ps1
+memory/
+*.md
+!backend/README.md
