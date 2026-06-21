@@ -26,6 +26,8 @@ def summary(_: dict = Depends(get_current_user)):
     q = store.col(store.SALES).where(filter=FieldFilter("created_at", ">=", start))
     for d in q.stream():
         s = d.to_dict()
+        if s.get("anulada"):
+            continue
         ventas_hoy += s.get("total", 0)
         num_ventas += 1
 
@@ -50,6 +52,8 @@ def sales_by_day(days: int = 7, _: dict = Depends(get_current_user)):
     q = store.col(store.SALES).where(filter=FieldFilter("created_at", ">=", since))
     for d in q.stream():
         s = d.to_dict()
+        if s.get("anulada"):
+            continue
         fecha = s["created_at"].astimezone(timezone.utc).date().isoformat()
         por_dia[fecha] += s.get("total", 0)
     return [{"fecha": f, "total": float(t)} for f, t in sorted(por_dia.items())]
@@ -62,7 +66,10 @@ def top_products(limit: int = 5, _: dict = Depends(get_current_user)):
     # Agrega sobre las ventas recientes (hasta 500 docs) para no recorrer todo el historial.
     q = store.col(store.SALES).order_by("created_at", direction=firestore.Query.DESCENDING).limit(500)
     for d in q.stream():
-        for it in d.to_dict().get("items", []):
+        s = d.to_dict()
+        if s.get("anulada"):
+            continue
+        for it in s.get("items", []):
             a = acum.setdefault(it["nombre"], {"nombre": it["nombre"], "cantidad": 0.0, "ingresos": 0.0})
             a["cantidad"] += it.get("cantidad", 0)
             a["ingresos"] += it.get("subtotal", 0)

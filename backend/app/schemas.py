@@ -17,6 +17,13 @@ class UserCreate(BaseModel):
     role: str = Field(default="vendedor", pattern="^(admin|vendedor)$")
 
 
+class UserUpdate(BaseModel):
+    name: str | None = Field(default=None, min_length=1, max_length=120)
+    role: str | None = Field(default=None, pattern="^(admin|vendedor)$")
+    active: bool | None = None
+    password: str | None = Field(default=None, min_length=PASSWORD_MIN, max_length=128)
+
+
 class UserOut(BaseModel):
     id: str
     email: EmailStr
@@ -96,6 +103,7 @@ class SaleOut(BaseModel):
     total: float
     created_at: datetime
     items: list[SaleItemOut]
+    anulada: bool = False
 
 
 # ---------- Mermas ----------

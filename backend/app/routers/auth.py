@@ -74,3 +74,60 @@ def create_user(data: schemas.UserCreate, _: dict = Depends(require_admin)):
     ref.set(doc)
     doc["id"] = ref.id
     return schemas.UserOut(**_public(doc))
+
+
+def _otros_admins_activos(excluir_id: str) -> int:
+    """Cuenta administradores activos distintos al usuario dado (para no dejar el sistema sin admin)."""
+    n = 0
+    for d in store.col(store.USERS).stream():
+        u = d.to_dict()
+        if d.id != excluir_id and u.get("role") == "admin" and u.get("active"):
+            n += 1
+    return n
+
+
+@router.patch("/users/{user_id}", response_model=schemas.UserOut)
+def update_user(user_id: str, data: schemas.UserUpdate, admin: dict = Depends(require_admin)):
+    ref = store.col(store.USERS).document(user_id)
+    snap = ref.get()
+    if not snap.exists:
+        raise HTTPException(status_code=404, detail="Usuario no encontrado")
+    actual = {**snap.to_dict(), "id": user_id}
+    cambios = data.model_dump(exclude_unset=True)
+
+    # No dejar el sistema sin ningún administrador activo.
+    era_admin_activo = actual.get("role") == "admin" and actual.get("active")
+    quita_admin = ("role" in cambios and cambios["role"] != "admin") or (cambios.get("active") is False)
+    if era_admin_activo and quita_admin and _otros_admins_activos(user_id) == 0:
+        raise HTTPException(status_code=400, detail="No puedes quitar al último administrador activo")
+    # El admin no puede desactivarse ni degradarse a sí mismo (evita auto-bloqueo).
+    if user_id == admin["id"] and (cambios.get("active") is False or cambios.get("role") == "vendedor"):
+        raise HTTPException(status_code=400, detail="No puedes desactivar o degradar tu propia cuenta")
+
+    update = {}
+    if "name" in cambios:
+        update["name"] = cambios["name"].strip()
+    if "role" in cambios:
+        update["role"] = cambios["role"]
+    if "active" in cambios:
+        update["active"] = cambios["active"]
+    if cambios.get("password"):
+        update["hashed_password"] = hash_password(cambios["password"])
+    if update:
+        ref.update(update)
+    return schemas.UserOut(**_public({**actual, **update}))
+
+
+@router.delete("/users/{user_id}", status_code=204)
+def delete_user(user_id: str, admin: dict = Depends(require_admin)):
+    if user_id == admin["id"]:
+        raise HTTPException(status_code=400, detail="No puedes eliminar tu propia cuenta")
+    ref = store.col(store.USERS).document(user_id)
+    snap = ref.get()
+    if not snap.exists:
+        raise HTTPException(status_code=404, detail="Usuario no encontrado")
+    u = snap.to_dict()
+    if u.get("role") == "admin" and u.get("active") and _otros_admins_activos(user_id) == 0:
+        raise HTTPException(status_code=400, detail="No puedes eliminar al último administrador activo")
+    ref.delete()
+    return None

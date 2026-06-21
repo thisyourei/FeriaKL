@@ -302,6 +302,7 @@
       </div>
       <div style="display:flex; gap:10px; flex-wrap:wrap">
         <button class="btn ghost" style="flex:1" onclick="go('reportes')">📈 Reportes</button>
+        <button class="btn ghost" style="flex:1" id="btnVentas" hidden onclick="go('ventas')">🧾 Ventas</button>
         <button class="btn ghost" style="flex:1" id="btnUsuarios" hidden onclick="go('usuarios')">👥 Usuarios</button>
       </div>
     </section>
@@ -360,6 +361,20 @@
       <p style="color:var(--muted); font-size:13px; padding:0 4px">Cada persona entra con su propio correo y contraseña. Los <b>administradores</b> gestionan productos y usuarios; los <b>vendedores</b> registran ventas y mermas.</p>
     </section>
 
+    <!-- VENTAS (historial, solo admin) -->
+    <section class="view" id="ventas">
+      <div class="panel">
+        <div class="panel-head"><h2>Historial de ventas</h2>
+          <label style="font-size:13px;color:var(--muted);display:flex;align-items:center;gap:6px;cursor:pointer">
+            <input type="checkbox" id="ventasVerAnuladas" style="width:auto" onchange="loadVentas()"> Ver eliminadas
+          </label>
+        </div>
+        <table><thead><tr><th>Fecha</th><th>Detalle</th><th>Pago</th><th class="num">Total</th><th></th></tr></thead>
+        <tbody id="ventasBody"></tbody></table>
+      </div>
+      <p style="color:var(--muted); font-size:13px; padding:0 4px">Las ventas no se editan. Al <b>eliminar</b> una, se devuelve el stock y deja de contar en los reportes, pero queda guardada como <b>Eliminada</b> para auditoría.</p>
+    </section>
+
     <!-- MERMAS -->
     <section class="view" id="mermas">
       <div class="cards">
@@ -398,17 +413,22 @@
   <!-- Modal: nuevo usuario -->
   <div class="modal-bg" id="userModal" style="display:none">
     <form class="modal" id="userForm">
-      <h3>Nuevo usuario</h3>
+      <h3 id="userTitle">Nuevo usuario</h3>
       <label for="uName">Nombre</label><input id="uName" placeholder="Nombre y apellido" required>
       <label for="uEmail">Correo</label><input id="uEmail" type="email" placeholder="correo@feriakl.cl" required>
-      <label for="uPass">Contraseña</label><input id="uPass" type="password" minlength="8" autocomplete="new-password" placeholder="mínimo 8 caracteres" required>
+      <label for="uPass"><span id="uPassLabel">Contraseña</span></label><input id="uPass" type="password" minlength="8" autocomplete="new-password" placeholder="mínimo 8 caracteres" required>
       <label for="uRole">Rol</label>
       <select id="uRole"><option value="vendedor">Vendedor (vende y registra mermas)</option><option value="admin">Administrador (todo)</option></select>
+      <div id="uActiveWrap" style="display:none">
+        <label for="uActive">Estado</label>
+        <select id="uActive"><option value="true">Activo (puede entrar)</option><option value="false">Inactivo (no puede entrar)</option></select>
+      </div>
       <div class="modal-err" id="uErr"></div>
       <div class="modal-actions">
         <button type="button" class="btn ghost" onclick="cerrarModal()">Cancelar</button>
         <button type="submit" class="btn" id="uSubmit">Crear usuario</button>
       </div>
+      <button type="button" class="btn red" id="uDelete" style="display:none;width:100%;margin-top:10px" onclick="eliminarUsuario()">🗑️ Eliminar usuario</button>
     </form>
   </div>
 
@@ -548,6 +568,7 @@ async function enterApp(){
   document.getElementById('appRoot').style.display = 'block';
   const esAdmin = currentUser && currentUser.role === 'admin';
   document.getElementById('btnUsuarios').hidden = !esAdmin;
+  document.getElementById('btnVentas').hidden = !esAdmin;
   await loadAll();
 }
 
@@ -556,7 +577,7 @@ async function loadAll(){
   await loadProducts();
   renderPOS(); renderInventory();
   const tareas = [ loadDashboard(), loadMermas(), loadReportes() ];
-  if (currentUser && currentUser.role === 'admin') tareas.push(loadUsuarios());
+  if (currentUser && currentUser.role === 'admin') { tareas.push(loadUsuarios()); tareas.push(loadVentas()); }
   await Promise.all(tareas);
 }
 async function loadProducts(){
@@ -566,11 +587,12 @@ async function loadProducts(){
 }
 
 /* ===== Navegación ===== */
-const titles = { dashboard:'Resumen del día', pos:'Punto de venta', inventory:'Inventario', mermas:'Mermas', reportes:'Reportes', usuarios:'Usuarios' };
+const titles = { dashboard:'Resumen del día', pos:'Punto de venta', inventory:'Inventario', mermas:'Mermas', reportes:'Reportes', usuarios:'Usuarios', ventas:'Historial de ventas' };
 function go(view){
   document.querySelectorAll('.view').forEach(v=>v.classList.toggle('active', v.id===view));
   document.querySelectorAll('#nav button').forEach(b=>b.classList.toggle('active', b.dataset.view===view));
   document.getElementById('viewTitle').textContent = titles[view];
+  if(view==='ventas' && currentUser && currentUser.role==='admin') loadVentas();
   window.scrollTo(0,0);
 }
 
@@ -731,22 +753,96 @@ function renderInventory(){
 }
 
 /* ===== Usuarios (solo admin) ===== */
+let usuarios = [];
+let userEditId = null;
 async function loadUsuarios(){
-  let data;
-  try { data = await api('/auth/users'); }
+  try { usuarios = await api('/auth/users'); }
   catch(e){ return; } // si no es admin, el backend responde 403; ignoramos
-  document.getElementById('usuariosBody').innerHTML = data.map(u=>
-    `<tr><td>${esc(u.name)}${u.id===currentUser.id?' <span style="color:var(--muted)">(tú)</span>':''}</td>
+  document.getElementById('usuariosBody').innerHTML = usuarios.map(u=>
+    `<tr class="row-edit" data-id="${esc(u.id)}" onclick="editUsuario(this.dataset.id)">
+      <td>${esc(u.name)}${u.id===currentUser.id?' <span style="color:var(--muted)">(tú)</span>':''}<span class="edit-ico">✏️</span></td>
       <td>${esc(u.email)}</td>
       <td><span class="badge ${u.role==='admin'?'ok':'low'}">${u.role==='admin'?'Administrador':'Vendedor'}</span></td>
       <td><span class="badge ${u.active?'ok':'out'}">${u.active?'Activo':'Inactivo'}</span></td></tr>`).join('');
 }
 function abrirNuevoUsuario(){
+  userEditId = null;
   document.getElementById('userForm').reset();
+  document.getElementById('userTitle').textContent = 'Nuevo usuario';
+  document.getElementById('uSubmit').textContent = 'Crear usuario';
+  document.getElementById('uPassLabel').textContent = 'Contraseña';
+  const pass = document.getElementById('uPass');
+  pass.required = true; pass.placeholder = 'mínimo 8 caracteres';
+  document.getElementById('uEmail').readOnly = false;
+  document.getElementById('uActiveWrap').style.display = 'none';
+  document.getElementById('uDelete').style.display = 'none';
   document.getElementById('uErr').textContent = '';
   document.getElementById('userModal').style.display = 'flex';
 }
+function editUsuario(id){
+  const u = usuarios.find(x=>x.id===id);
+  if(!u) return;
+  userEditId = id;
+  document.getElementById('userForm').reset();
+  document.getElementById('userTitle').textContent = 'Editar usuario';
+  document.getElementById('uSubmit').textContent = 'Guardar cambios';
+  document.getElementById('uName').value = u.name;
+  document.getElementById('uEmail').value = u.email;
+  document.getElementById('uEmail').readOnly = true;   // el correo es la identidad de acceso
+  document.getElementById('uRole').value = u.role;
+  document.getElementById('uPassLabel').textContent = 'Nueva contraseña (opcional)';
+  const pass = document.getElementById('uPass');
+  pass.required = false; pass.value = ''; pass.placeholder = 'dejar en blanco para no cambiarla';
+  document.getElementById('uActiveWrap').style.display = 'block';
+  document.getElementById('uActive').value = String(!!u.active);
+  // No puedes eliminarte ni desactivarte a ti mismo.
+  const esYo = id === currentUser.id;
+  document.getElementById('uDelete').style.display = esYo ? 'none' : 'block';
+  document.getElementById('uActiveWrap').style.display = esYo ? 'none' : 'block';
+  document.getElementById('uErr').textContent = '';
+  document.getElementById('userModal').style.display = 'flex';
+}
+async function eliminarUsuario(){
+  if(!userEditId) return;
+  const u = usuarios.find(x=>x.id===userEditId);
+  if(!confirm('¿Eliminar al usuario "'+(u?u.name:'')+'"? Esta acción no se puede deshacer.')) return;
+  const btn = document.getElementById('uDelete'), err = document.getElementById('uErr');
+  err.textContent=''; btn.disabled=true; btn.textContent='Eliminando...';
+  try {
+    await api('/auth/users/' + encodeURIComponent(userEditId), { method:'DELETE' });
+    cerrarModal(); toast('Usuario eliminado'); await loadUsuarios();
+  } catch(ex){ err.textContent = ex.message; }
+  finally { btn.disabled=false; btn.textContent='🗑️ Eliminar usuario'; }
+}
 function cerrarModal(){ document.getElementById('userModal').style.display = 'none'; }
+
+/* ===== Ventas (historial, solo admin) — anular = ocultar pero conservar en BD ===== */
+async function loadVentas(){
+  const verAnuladas = document.getElementById('ventasVerAnuladas').checked;
+  let data;
+  try { data = await api('/sales?limit=100' + (verAnuladas ? '&incluir_anuladas=true' : '')); }
+  catch(e){ return; }
+  document.getElementById('ventasBody').innerHTML = data.map(v=>{
+    const f = new Date(v.created_at).toLocaleString('es-CL',{day:'numeric',month:'short',hour:'2-digit',minute:'2-digit'});
+    const detalle = v.items.map(i=>esc(i.nombre)+' ×'+(i.cantidad)).join(', ') || '—';
+    const pago = v.metodo_pago.charAt(0).toUpperCase()+v.metodo_pago.slice(1);
+    const tachado = v.anulada ? 'text-decoration:line-through;opacity:.6' : '';
+    const accion = v.anulada
+      ? '<span class="badge out">Eliminada</span>'
+      : `<button class="btn red sm" data-id="${esc(v.id)}" onclick="anularVenta(this.dataset.id)">Eliminar</button>`;
+    return `<tr style="${tachado}"><td style="white-space:nowrap">${f}</td><td>${detalle}</td>
+      <td><span class="badge ok">${pago}</span></td><td class="num">${fmt(v.total)}</td><td style="text-align:right">${accion}</td></tr>`;
+  }).join('') || '<tr><td colspan="5" style="color:var(--muted)">Sin ventas registradas</td></tr>';
+}
+async function anularVenta(id){
+  if(!confirm('¿Eliminar esta venta?\nSe devolverá el stock y dejará de contar en los reportes. Quedará guardada como "Eliminada".')) return;
+  try {
+    await api('/sales/' + encodeURIComponent(id), { method:'DELETE' });
+    toast('Venta eliminada · stock devuelto');
+    await loadProducts(); renderPOS(); renderInventory();
+    await Promise.all([ loadVentas(), loadDashboard(), loadReportes() ]);
+  } catch(e){ toast('No se pudo eliminar: ' + e.message, true); }
+}
 
 /* ===== Mermas ===== */
 async function loadMermas(){
@@ -1090,18 +1186,33 @@ document.getElementById('pwdForm').addEventListener('submit', async e=>{
 });
 document.getElementById('userForm').addEventListener('submit', async e=>{
   e.preventDefault();
+  const editando = !!userEditId;
+  const labelBtn = editando ? 'Guardar cambios' : 'Crear usuario';
   const btn = document.getElementById('uSubmit'), err = document.getElementById('uErr');
-  err.textContent=''; btn.disabled=true; btn.textContent='Creando...';
+  err.textContent=''; btn.disabled=true; btn.textContent = editando ? 'Guardando...' : 'Creando...';
+  const pass = document.getElementById('uPass').value;
   try {
-    await api('/auth/users', { body:{
-      name: document.getElementById('uName').value.trim(),
-      email: document.getElementById('uEmail').value.trim(),
-      password: document.getElementById('uPass').value,
-      role: document.getElementById('uRole').value,
-    }});
-    cerrarModal(); toast('Usuario creado'); await loadUsuarios();
+    if(editando){
+      const body = {
+        name: document.getElementById('uName').value.trim(),
+        role: document.getElementById('uRole').value,
+        active: document.getElementById('uActive').value === 'true',
+      };
+      if(pass) body.password = pass;
+      await api('/auth/users/' + encodeURIComponent(userEditId), { method:'PATCH', body });
+      cerrarModal(); toast('Usuario actualizado');
+    } else {
+      await api('/auth/users', { body:{
+        name: document.getElementById('uName').value.trim(),
+        email: document.getElementById('uEmail').value.trim(),
+        password: pass,
+        role: document.getElementById('uRole').value,
+      }});
+      cerrarModal(); toast('Usuario creado');
+    }
+    await loadUsuarios();
   } catch(ex){ err.textContent = ex.message; }
-  finally { btn.disabled=false; btn.textContent='Crear usuario'; }
+  finally { btn.disabled=false; btn.textContent=labelBtn; }
 });
 document.getElementById('prodForm').addEventListener('submit', async e=>{
   e.preventDefault();
