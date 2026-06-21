@@ -50,7 +50,8 @@ def create_sale(data: schemas.SaleCreate, user: dict = Depends(get_current_user)
             total += subtotal
             nuevos_stock[pid] = p["stock"] - cant
             items_out.append({"product_id": pid, "nombre": p["nombre"], "precio": p["precio"],
-                              "cantidad": cant, "subtotal": subtotal})
+                              "cantidad": cant, "subtotal": subtotal,
+                              "medida_tipo": p.get("medida_tipo"), "medida_valor": p.get("medida_valor")})
 
         for pid, nuevo in nuevos_stock.items():  # luego las escrituras
             txn.update(refs[pid], {"stock": nuevo})

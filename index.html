@@ -825,8 +825,10 @@ function mostrarBoleta(sale){
   ultimaVenta = sale; boletaPdfBlob = null;
   const f = folioDe(sale);
   const fecha = new Date(sale.created_at).toLocaleString('es-CL',{day:'numeric',month:'short',year:'numeric',hour:'2-digit',minute:'2-digit'});
-  const filas = sale.items.map(i=>
-    `<div class="rcp-item"><span>${i.cantidad} × ${esc(i.nombre)}</span><span>${fmt(i.subtotal)}</span></div>`).join('');
+  const filas = sale.items.map(i=>{
+    const med = medidaTxt(i);
+    return `<div class="rcp-item"><span>${i.cantidad} × ${esc(i.nombre)}${med?' · '+esc(med):''}</span><span>${fmt(i.subtotal)}</span></div>`;
+  }).join('');
   const pago = sale.metodo_pago.charAt(0).toUpperCase()+sale.metodo_pago.slice(1);
   let extra = '';
   if(sale.metodo_pago==='efectivo' && sale.pagado_con){

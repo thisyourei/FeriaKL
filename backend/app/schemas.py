@@ -106,6 +106,8 @@ class SaleItemOut(BaseModel):
     precio: float
     cantidad: float
     subtotal: float
+    medida_tipo: str | None = None   # formato del producto al momento de la venta
+    medida_valor: float | None = None
 
 
 class SaleOut(BaseModel):

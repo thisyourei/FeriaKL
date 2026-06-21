@@ -29,6 +29,22 @@ def _metodo(m: str) -> str:
     return {"efectivo": "Efectivo", "transferencia": "Transferencia"}.get(m, m or "—")
 
 
+def _medida_txt(item: dict) -> str:
+    """Formato/presentación del ítem en texto corto: '5 L', '1 Kg', 'Pack 6'."""
+    tipo = item.get("medida_tipo")
+    valor = item.get("medida_valor")
+    if not tipo or not valor:
+        return ""
+    v = f"{float(valor):g}"
+    if tipo == "litros":
+        return f"{v} L"
+    if tipo == "kilos":
+        return f"{v} Kg"
+    if tipo == "pack":
+        return f"Pack {v}"
+    return ""
+
+
 def build_pdf(sale: dict, business_name: str) -> bytes:
     """Construye el PDF de la boleta y devuelve sus bytes."""
     items = sale.get("items", [])
@@ -36,7 +52,8 @@ def build_pdf(sale: dict, business_name: str) -> bytes:
     extra = 0
     if sale.get("metodo_pago") == "efectivo" and sale.get("pagado_con"):
         extra = 12
-    alto = 70 + len(items) * 7 + extra
+    con_medida = sum(1 for it in items if _medida_txt(it))  # ítems con una 2ª línea de presentación
+    alto = 70 + len(items) * 7 + con_medida * 5 + extra
     pdf = FPDF(orientation="P", unit="mm", format=(80, alto))
     pdf.set_auto_page_break(False)
     pdf.set_margins(6, 6, 6)
@@ -62,18 +79,25 @@ def build_pdf(sale: dict, business_name: str) -> bytes:
     pdf.ln(2)
 
     # Ítems
-    pdf.set_font("Helvetica", "", 9)
     for it in items:
         nombre = str(it.get("nombre", ""))
         cant = it.get("cantidad", 0)
         cant_txt = (f"{cant:g}")
-        # Línea 1: cantidad x nombre  (recortado para que quepa)
+        # Línea 1: cantidad x nombre  (recortado para que quepa) + subtotal a la derecha
         etiqueta = f"{cant_txt} x {nombre}"
-        if len(etiqueta) > 32:
-            etiqueta = etiqueta[:31] + "…"
+        if len(etiqueta) > 30:
+            etiqueta = etiqueta[:29] + "…"
+        pdf.set_font("Helvetica", "", 9)
         pdf.cell(ancho * 0.66, 6, etiqueta, new_x="RIGHT", new_y="TOP")
         pdf.cell(ancho * 0.34, 6, _money(it.get("subtotal", 0)), align="R",
                  new_x="LMARGIN", new_y="NEXT")
+        # Línea 2 (si aplica): presentación del producto, ej. "Presentación: 5 L".
+        med = _medida_txt(it)
+        if med:
+            pdf.set_font("Helvetica", "I", 8)
+            pdf.set_text_color(120, 120, 120)
+            pdf.cell(ancho, 4.5, f"     Presentacion: {med}", new_x="LMARGIN", new_y="NEXT")
+            pdf.set_text_color(0, 0, 0)
 
     pdf.ln(1)
     pdf.line(6, pdf.get_y(), 74, pdf.get_y())
