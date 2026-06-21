@@ -203,6 +203,21 @@
   .modal-err { color:var(--red); font-size:13px; margin-top:12px; min-height:16px; }
   .modal-actions { display:flex; gap:10px; margin-top:18px; }
   .modal-actions .btn { flex:1; }
+  /* Pago en efectivo */
+  .pay-total { display:flex; justify-content:space-between; align-items:center; background:var(--green-light); color:var(--green-dark); padding:12px 14px; border-radius:10px; font-size:14px; font-weight:600; }
+  .pay-total b { font-size:22px; font-variant-numeric:tabular-nums; }
+  #payCash { font-size:22px; font-weight:700; text-align:right; font-variant-numeric:tabular-nums; }
+  .pay-quick { display:flex; flex-wrap:wrap; gap:7px; margin-top:10px; }
+  .pay-quick button { flex:1 0 auto; min-width:72px; padding:9px 6px; border:1px solid var(--border); border-radius:9px; background:#fff; font-size:14px; font-weight:600; cursor:pointer; color:var(--text); }
+  .pay-quick button:hover { border-color:var(--green); }
+  .pay-change { margin-top:14px; font-size:15px; font-weight:600; color:var(--muted); display:flex; justify-content:space-between; align-items:center; }
+  .pay-change b { font-size:26px; font-variant-numeric:tabular-nums; color:var(--text); }
+  .pay-change.ok b { color:var(--green-dark); }
+  .pay-change.short b { color:var(--red); }
+  /* Editar producto en inventario */
+  tr.row-edit { cursor:pointer; }
+  tr.row-edit:hover { background:var(--green-light); }
+  .edit-ico { color:var(--muted); font-size:13px; margin-left:6px; }
   /* Botón escanear en POS */
   .scan-btn { width:100%; margin-bottom:12px; padding:16px; font-size:16px; background:var(--green-dark); box-shadow:0 3px 10px rgba(27,94,32,.3); }
   /* Sección de productos manual — colapsable */
@@ -414,7 +429,7 @@
   <!-- Modal: nuevo producto -->
   <div class="modal-bg" id="prodModal" style="display:none">
     <form class="modal" id="prodForm">
-      <h3>Nuevo producto</h3>
+      <h3 id="prodTitle">Nuevo producto</h3>
       <label for="pName">Nombre</label><input id="pName" placeholder="Ej: Cloro Clorox 1L" required>
       <label for="pBarcode">Código de barra</label>
       <div style="display:flex; gap:8px">
@@ -435,6 +450,23 @@
       <div class="modal-actions">
         <button type="button" class="btn ghost" onclick="cerrarProdModal()">Cancelar</button>
         <button type="submit" class="btn" id="pSubmit">Crear producto</button>
+      </div>
+    </form>
+  </div>
+
+  <!-- Modal: pago en efectivo (calcula vuelto) -->
+  <div class="modal-bg" id="payModal" style="display:none">
+    <form class="modal" id="payForm">
+      <h3>💵 Pago en efectivo</h3>
+      <div class="pay-total">Total a cobrar <b id="payTotal">$0</b></div>
+      <label for="payCash">¿Con cuánto paga?</label>
+      <input id="payCash" inputmode="numeric" placeholder="$" autocomplete="off">
+      <div class="pay-quick" id="payQuick"></div>
+      <div class="pay-change" id="payChange">Vuelto: <b>$0</b></div>
+      <div class="modal-err" id="payErr"></div>
+      <div class="modal-actions">
+        <button type="button" class="btn ghost" onclick="cerrarPago()">Cancelar</button>
+        <button type="submit" class="btn" id="paySubmit">Confirmar venta</button>
       </div>
     </form>
   </div>
@@ -621,25 +653,78 @@ function renderCart(){
   document.getElementById('cartGrand').textContent = fmt(total);
   document.getElementById('cartClear').hidden = !cart.length;
 }
-async function cobrar(metodo){
+function cartTotal(){ return cart.reduce((s,c)=>s+c.precio*c.qty,0); }
+
+function cobrar(metodo){
   if(!cart.length) { toast('El carrito está vacío', true); return; }
+  if(metodo==='Efectivo'){ abrirPago(); return; }
+  finalizarVenta(metodo);
+}
+
+// Registra la venta en el backend (común a efectivo y transferencia).
+async function finalizarVenta(metodo, btn){
   const map = { Efectivo:'efectivo', Transferencia:'transferencia' };
   const items = cart.map(c=>({ product_id:c.id, cantidad:c.qty }));
+  if(btn){ btn.disabled=true; btn.textContent='Cobrando...'; }
   try {
     const sale = await api('/sales', { body:{ metodo_pago: map[metodo], items } });
     cart = [];
+    cerrarPago();
     await loadProducts(); renderPOS();
     loadDashboard();
     toast('✅ Venta ' + fmt(sale.total) + ' · ' + metodo);
   } catch(e){ toast('No se pudo cobrar: ' + e.message, true); }
+  finally { if(btn){ btn.disabled=false; btn.textContent='Confirmar venta'; } }
 }
+
+/* ---------- Pago en efectivo: pregunta con cuánto paga y calcula el vuelto ---------- */
+function abrirPago(){
+  const total = cartTotal();
+  document.getElementById('payTotal').textContent = fmt(total);
+  document.getElementById('payCash').value = '';
+  document.getElementById('payErr').textContent = '';
+  // Sugerencias: monto exacto + billetes comunes mayores al total.
+  const denoms = [1000,2000,5000,10000,20000];
+  const sugeridos = [total, ...denoms.filter(d=>d>total)].filter((v,i,a)=>a.indexOf(v)===i).slice(0,5);
+  document.getElementById('payQuick').innerHTML = sugeridos.map(v=>
+    `<button type="button" data-v="${v}" onclick="setPago(this.dataset.v)">${v===total?'Justo':fmt(v)}</button>`).join('');
+  actualizarVuelto();
+  document.getElementById('payModal').style.display = 'flex';
+  setTimeout(()=>document.getElementById('payCash').focus(), 50);
+}
+function cerrarPago(){ document.getElementById('payModal').style.display = 'none'; }
+function setPago(v){ document.getElementById('payCash').value = v; actualizarVuelto(); }
+function actualizarVuelto(){
+  const total = cartTotal();
+  const paga = Number(String(document.getElementById('payCash').value).replace(/[^\d]/g,'')) || 0;
+  const box = document.getElementById('payChange');
+  const btn = document.getElementById('paySubmit');
+  if(paga===0){ box.className='pay-change'; box.innerHTML='Vuelto: <b>$0</b>'; btn.disabled=false; return; }
+  const vuelto = paga - total;
+  if(vuelto < 0){ box.className='pay-change short'; box.innerHTML='Falta: <b>'+fmt(-vuelto)+'</b>'; }
+  else { box.className='pay-change ok'; box.innerHTML='Vuelto: <b>'+fmt(vuelto)+'</b>'; }
+  btn.disabled = false;
+}
+document.getElementById('payCash').addEventListener('input', actualizarVuelto);
+document.getElementById('payForm').addEventListener('submit', e=>{
+  e.preventDefault();
+  const total = cartTotal();
+  const paga = Number(String(document.getElementById('payCash').value).replace(/[^\d]/g,'')) || 0;
+  const err = document.getElementById('payErr');
+  if(paga && paga < total){ err.textContent = 'El monto recibido es menor al total.'; return; }
+  err.textContent = '';
+  finalizarVenta('Efectivo', document.getElementById('paySubmit'));
+});
 
 /* ---------- Render Inventario ---------- */
 function renderInventory(){
   const q=(document.getElementById('invSearch').value||'').toLowerCase();
+  const esAdmin = currentUser && currentUser.role==='admin';
   document.getElementById('invBody').innerHTML = productos.filter(p=>p.nombre.toLowerCase().includes(q)).map(p=>{
     const [c,t]=estado(p); const margen=Math.round((p.precio-p.costo)/p.precio*100);
-    return `<tr><td>${esc(p.emoji)} ${esc(p.nombre)}</td><td style="font-variant-numeric:tabular-nums;color:var(--muted)">${esc(p.barcode)||'—'}</td><td class="num">${fmt(p.precio)}</td><td class="num">${fmt(p.costo)}</td>
+    const click = esAdmin ? ` class="row-edit" data-id="${esc(p.id)}" onclick="editProducto(this.dataset.id)"` : '';
+    const lapiz = esAdmin ? '<span class="edit-ico">✏️</span>' : '';
+    return `<tr${click}><td>${esc(p.emoji)} ${esc(p.nombre)}${lapiz}</td><td style="font-variant-numeric:tabular-nums;color:var(--muted)">${esc(p.barcode)||'—'}</td><td class="num">${fmt(p.precio)}</td><td class="num">${fmt(p.costo)}</td>
       <td class="num">${margen}%</td><td class="num">${p.stock} ${esc(p.unidad)}</td><td><span class="badge ${c}">${t}</span></td></tr>`;
   }).join('');
 }
@@ -691,13 +776,35 @@ async function registrarMerma(){
   catch(e){ toast(e.message, true); }
 }
 
-/* ===== Nuevo producto (solo admin) — modal con escaneo o tipeo ===== */
+/* ===== Nuevo/editar producto (solo admin) — modal con escaneo o tipeo ===== */
+let prodEditId = null;
 function nuevoProducto(){
   if(currentUser && currentUser.role!=='admin') return toast('Solo el administrador puede agregar productos', true);
+  prodEditId = null;
   document.getElementById('prodForm').reset();
+  document.getElementById('prodTitle').textContent = 'Nuevo producto';
+  document.getElementById('pSubmit').textContent = 'Crear producto';
   document.getElementById('pCat').value = 'General';
   document.getElementById('pCosto').value = '0';
   document.getElementById('pStock').value = '0';
+  document.getElementById('pErr').textContent = '';
+  document.getElementById('prodModal').style.display = 'flex';
+}
+function editProducto(id){
+  if(currentUser && currentUser.role!=='admin') return toast('Solo el administrador puede editar productos', true);
+  const p = productos.find(x=>x.id===id);
+  if(!p) return;
+  prodEditId = id;
+  document.getElementById('prodForm').reset();
+  document.getElementById('prodTitle').textContent = 'Editar producto';
+  document.getElementById('pSubmit').textContent = 'Guardar cambios';
+  document.getElementById('pName').value = p.nombre;
+  document.getElementById('pBarcode').value = p.barcode || '';
+  document.getElementById('pCat').value = p.cat || 'General';
+  document.getElementById('pUnidad').value = p.unidad;
+  document.getElementById('pPrecio').value = p.precio;
+  document.getElementById('pCosto').value = p.costo;
+  document.getElementById('pStock').value = p.stock;
   document.getElementById('pErr').textContent = '';
   document.getElementById('prodModal').style.display = 'flex';
 }
@@ -980,25 +1087,31 @@ document.getElementById('userForm').addEventListener('submit', async e=>{
 });
 document.getElementById('prodForm').addEventListener('submit', async e=>{
   e.preventDefault();
+  const editando = !!prodEditId;
+  const labelBtn = editando ? 'Guardar cambios' : 'Crear producto';
   const btn = document.getElementById('pSubmit'), err = document.getElementById('pErr');
-  err.textContent=''; btn.disabled=true; btn.textContent='Creando...';
+  err.textContent=''; btn.disabled=true; btn.textContent = editando ? 'Guardando...' : 'Creando...';
   const precio = Number(String(document.getElementById('pPrecio').value).replace(/[^\d]/g,''));
-  if(!precio){ err.textContent='Ingresa un precio válido'; btn.disabled=false; btn.textContent='Crear producto'; return; }
+  if(!precio){ err.textContent='Ingresa un precio válido'; btn.disabled=false; btn.textContent=labelBtn; return; }
+  const payload = {
+    nombre: document.getElementById('pName').value.trim(),
+    barcode: document.getElementById('pBarcode').value.trim() || null,
+    categoria: document.getElementById('pCat').value.trim() || 'General',
+    unidad: document.getElementById('pUnidad').value,
+    precio,
+    costo: Number(String(document.getElementById('pCosto').value).replace(/[^\d]/g,'')) || 0,
+    stock: Number(String(document.getElementById('pStock').value).replace(',','.')) || 0,
+  };
   try {
-    await api('/products', { body:{
-      nombre: document.getElementById('pName').value.trim(),
-      barcode: document.getElementById('pBarcode').value.trim() || null,
-      categoria: document.getElementById('pCat').value.trim() || 'General',
-      unidad: document.getElementById('pUnidad').value,
-      precio,
-      costo: Number(String(document.getElementById('pCosto').value).replace(/[^\d]/g,'')) || 0,
-      stock: Number(String(document.getElementById('pStock').value).replace(',','.')) || 0,
-      emoji: '🧴',
-    }});
-    cerrarProdModal(); toast('Producto agregado');
+    if(editando){
+      await api('/products/' + encodeURIComponent(prodEditId), { method:'PATCH', body: payload });
+    } else {
+      await api('/products', { body:{ ...payload, emoji:'🧴' } });
+    }
+    cerrarProdModal(); toast(editando ? 'Producto actualizado' : 'Producto agregado');
     await loadProducts(); renderInventory(); renderPOS(); loadDashboard();
   } catch(ex){ err.textContent = ex.message; }
-  finally { btn.disabled=false; btn.textContent='Crear producto'; }
+  finally { btn.disabled=false; btn.textContent=labelBtn; }
 });
 document.getElementById('loginForm').addEventListener('submit', async e=>{
   e.preventDefault();
